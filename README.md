@@ -1,36 +1,42 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# AuditAI — Campaign Intelligence Chatbot
 
-## Getting Started
+An AI-powered chatbot for Amazon advertising campaign audits. Upload your campaign data and ask questions in plain English. Generate PowerPoint presentations instantly.
 
-First, run the development server:
+## Features
+
+- **Upload & Analyze** — drag & drop Excel/CSV files (Sales, Traffic, Campaign, Search Term reports)
+- **Smart Chat** — ask questions like "What's wasting budget?" or "Which keywords should I pause?"
+- **Zero Hallucinations** — Python-style audit engine computes all facts; LLM only formats language
+- **PowerPoint Export** — 8-slide presentation generated from your data in one click
+- **Privacy First** — your data never leaves your browser (processed client-side)
+- **Optional OpenAI** — works without an API key; add one for enhanced natural language responses
+
+## One-Link Deploy (Vercel)
+
+[![Deploy with Vercel](https://vercel.com/button)](https://vercel.com/new/clone?repository-url=https://github.com/YOUR_USERNAME/auditai)
+
+## Local Development
 
 ```bash
+npm install
 npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+Open [http://localhost:3000](http://localhost:3000)
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+## Supported File Types
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+| File | What it provides |
+|------|-----------------|
+| Sales Report (`.xlsx`) | ASIN-level sales, units, revenue |
+| Traffic Report (`.xlsx`) | Sessions, page views, CVR |
+| Campaign Report (`.xlsx`) | Keywords, bids, ACOS, spend, CTR |
+| Search Term Report (`.xlsx`) | Query-level performance |
 
-## Learn More
+## Tech Stack
 
-To learn more about Next.js, take a look at the following resources:
-
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
-
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
-
-## Deploy on Vercel
-
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+- **Next.js 16** (App Router)
+- **SheetJS** — client-side Excel parsing
+- **PptxGenJS** — PowerPoint generation
+- **OpenAI API** (optional) — gpt-3.5-turbo for language enhancement
+- **Vercel** — one-click deployment
