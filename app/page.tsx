@@ -2,7 +2,7 @@
 import { useState, useRef, useEffect, useCallback } from "react";
 import * as XLSX from "xlsx";
 import { runAuditEngine, AuditResult, RawData } from "@/lib/auditEngine";
-import { buildLocalResponse, getIntent, ChatMessage } from "@/lib/chatEngine";
+import { buildLocalResponse, buildComparisonTable, getIntent, ChatMessage } from "@/lib/chatEngine";
 import { brand } from "@/lib/brand";
 
 // ── Helpers ──
@@ -21,6 +21,9 @@ const SUGGESTIONS = [
   { label: "📦 ASIN performance", q: "Show me the ASIN cohort analysis" },
   { label: "📣 Campaign issues?", q: "Show me campaign health overview" },
   { label: "📊 Why this score?", q: "Why is our health score low?" },
+  { label: "📋 Campaign table", q: "Show me all campaigns in a table" },
+  { label: "📋 ASIN table", q: "Show me all ASINs in a table" },
+  { label: "⇄ Compare periods", q: "Compare this period to last period" },
   { label: "📑 Create PowerPoint", q: "Create a PowerPoint presentation of the full audit" },
 ];
 
@@ -98,6 +101,7 @@ export default function Home() {
   const [uploadedFiles, setUploadedFiles] = useState<UploadedFile[]>([]);
   const [rawData, setRawData]       = useState<Partial<RawData>>({});
   const [audit, setAudit]           = useState<AuditResult | null>(null);
+  const [compareAudit, setCompareAudit] = useState<AuditResult | null>(null);
   const [messages, setMessages]     = useState<ChatMessage[]>([]);
   const [input, setInput]           = useState("");
   const [isTyping, setIsTyping]     = useState(false);
@@ -107,8 +111,9 @@ export default function Home() {
   const [activeTopic, setActiveTopic] = useState("all");
   const [isDragging, setIsDragging] = useState(false);
   const [parseError, setParseError] = useState("");
-  const messagesEndRef = useRef<HTMLDivElement>(null);
-  const fileInputRef   = useRef<HTMLInputElement>(null);
+  const messagesEndRef   = useRef<HTMLDivElement>(null);
+  const fileInputRef     = useRef<HTMLInputElement>(null);
+  const compareInputRef  = useRef<HTMLInputElement>(null);
 
   useEffect(() => { messagesEndRef.current?.scrollIntoView({ behavior: "smooth" }); }, [messages]);
 
@@ -200,7 +205,9 @@ export default function Home() {
       searchTerm: (rawData.searchTerm  ?? []) as Record<string, unknown>[],
     };
     const result = runAuditEngine(data);
+    result.periodLabel = "Current Period";
     setAudit(result);
+    setCompareAudit(null);
     setScreen("chat");
 
     const totalRows = uploadedFiles.reduce((s, f) => s + f.rows, 0);
@@ -223,6 +230,48 @@ export default function Home() {
     );
   };
 
+  // ── Compare Period file handler ──
+  const handleComparePeriod = useCallback(async (fileList: FileList) => {
+    if (!fileList.length || !audit) return;
+    const file = fileList[0];
+    try {
+      const buf = await file.arrayBuffer();
+      const wb  = XLSX.read(buf, { type: "array" });
+
+      const spCampSheet = wb.SheetNames.find(n =>
+        n.toLowerCase().includes("sponsored products campaigns") ||
+        n.toLowerCase().includes("sp campaigns")
+      );
+      const stSheet = wb.SheetNames.find(n =>
+        n.toLowerCase().includes("sp search term") ||
+        n.toLowerCase().includes("search term report")
+      );
+
+      let campRows: Record<string, unknown>[] = [];
+      let stRows:   Record<string, unknown>[] = [];
+      if (spCampSheet) campRows = parseSheet(wb.Sheets[spCampSheet]);
+      if (stSheet)     stRows   = parseSheet(wb.Sheets[stSheet]);
+
+      const compareData: RawData = {
+        sales:      (rawData.sales      ?? []) as Record<string, unknown>[],
+        traffic:    (rawData.traffic     ?? []) as Record<string, unknown>[],
+        campaign:   campRows.length ? campRows : (rawData.campaign ?? []) as Record<string, unknown>[],
+        searchTerm: stRows.length   ? stRows   : (rawData.searchTerm ?? []) as Record<string, unknown>[],
+      };
+
+      const compareResult = runAuditEngine(compareData);
+      compareResult.periodLabel = `Compare: ${file.name.slice(0, 20)}`;
+      setCompareAudit(compareResult);
+
+      addBotMessage(
+        `Period comparison loaded — <strong>${file.name}</strong>. Here's the side-by-side breakdown:<br>` +
+        buildComparisonTable(audit, compareResult)
+      );
+    } catch {
+      addBotMessage(`<div class="fc"><div class="fc-detail">Could not parse comparison file. Please upload a valid bulk campaign Excel file.</div></div>`);
+    }
+  }, [audit, rawData]);
+
   // ── Messaging ──
   function addBotMessage(content: string) {
     setMessages(prev => [...prev, { id: uid(), role: "assistant", content, timestamp: new Date() }]);
@@ -244,6 +293,17 @@ export default function Home() {
         `4. Budget Waste Analysis<br>5. Keyword Audit<br>6. Search Term Opportunities<br>` +
         `7. ASIN Cohort Analysis<br>8. 30-Day Action Plan<br><br>` +
         `<button class="dl-btn" onclick="window._downloadPptx && window._downloadPptx()">⬇ Download PowerPoint</button>`
+      );
+      return;
+    }
+
+    // Compare intent with two audits loaded — show diff table immediately
+    if (intent === "compare" && compareAudit) {
+      await new Promise(r => setTimeout(r, 400));
+      setIsTyping(false);
+      addBotMessage(
+        `Period comparison — <strong>${audit.periodLabel}</strong> vs <strong>${compareAudit.periodLabel}</strong>:<br>` +
+        buildComparisonTable(audit, compareAudit)
       );
       return;
     }
@@ -294,7 +354,7 @@ export default function Home() {
   }, [audit, brandName]);
 
   const resetApp = () => {
-    setScreen("upload"); setMessages([]); setAudit(null);
+    setScreen("upload"); setMessages([]); setAudit(null); setCompareAudit(null);
     setUploadedFiles([]); setRawData({}); setBrandName("");
   };
 
@@ -356,7 +416,7 @@ export default function Home() {
 
         /* UPLOAD SCREEN */
         .upload-screen{flex:1;display:flex;align-items:center;justify-content:center;padding:32px;overflow-y:auto}
-        .upload-card{background:#fff;border:1px solid #e5e7eb;border-radius:16px;padding:40px;max-width:560px;width:100%}
+        .upload-card{background:#fff;border:1px solid #e5e7eb;border-radius:16px;padding:40px;max-width:560px;width:100%;overflow:hidden}
         .upload-card h1{font-size:22px;font-weight:800;margin-bottom:6px}
         .upload-card p{color:#57606a;font-size:13px;margin-bottom:24px;line-height:1.6}
         .brand-row{display:flex;gap:8px;margin-bottom:16px}
@@ -364,15 +424,15 @@ export default function Home() {
         .brand-input:focus{border-color:${brand.accentColor}}
 
         /* FILE SLOTS */
-        .file-slots{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:16px}
-        .file-slot{border:1px dashed #d1d5db;border-radius:8px;padding:12px;text-align:center;cursor:pointer;transition:all .15s}
+        .file-slots{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:16px;width:100%}
+        .file-slot{min-width:0;overflow:hidden;border:1px dashed #d1d5db;border-radius:8px;padding:12px;text-align:center;cursor:pointer;transition:all .15s}
         .file-slot:hover{border-color:#3b82d4;background:#f8faff}
         .file-slot.filled{border-style:solid;border-color:#22c55e;background:#f0fdf4}
         .file-slot.required{border-color:#f59e0b}
         .slot-icon{font-size:20px;margin-bottom:4px}
         .slot-name{font-size:12px;font-weight:700;color:#1f2328}
         .slot-sub{font-size:10px;color:#57606a;margin-top:2px}
-        .slot-filled{font-size:10px;color:#22c55e;font-weight:600;margin-top:3px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:100%}
+        .slot-filled{font-size:10px;color:#22c55e;font-weight:600;margin-top:3px;white-space:normal;overflow:hidden;text-overflow:ellipsis;word-break:break-all;max-width:100%}
         .slot-badge{display:inline-block;font-size:9px;font-weight:700;padding:1px 5px;border-radius:3px;margin-bottom:3px}
         .slot-badge.req{background:#fef3c7;color:#92400e}
         .slot-badge.opt{background:#f0f9ff;color:#0369a1}
@@ -400,6 +460,8 @@ export default function Home() {
         .ch-btn:hover{background:#f7f8fa}
         .ch-btn.primary{background:${brand.accentColor};color:#fff;border-color:${brand.accentColor}}
         .ch-btn.primary:hover{background:${brand.accentHover}}
+        .ch-btn.compare-btn{background:#f0f9ff;color:#0369a1;border-color:#bae6fd}
+        .ch-btn.compare-btn:hover{background:#e0f2fe}
 
         /* MESSAGES */
         .messages{flex:1;overflow-y:auto;padding:20px;display:flex;flex-direction:column;gap:14px}
@@ -663,8 +725,18 @@ export default function Home() {
                 </div>
                 <div className="ch-actions">
                   <button className="ch-btn primary" onClick={() => sendMessage("Create a PowerPoint presentation of the full audit")}>📑 Export PPT</button>
+                  <button className="ch-btn compare-btn" onClick={() => compareInputRef.current?.click()}>
+                    {compareAudit ? "✓ Period Loaded" : "⇄ Compare Period"}
+                  </button>
                   <button className="ch-btn" onClick={resetApp}>Upload New Files</button>
                 </div>
+                <input
+                  ref={compareInputRef}
+                  type="file"
+                  accept=".xlsx,.xls"
+                  style={{ display: "none" }}
+                  onChange={e => { if (e.target.files) handleComparePeriod(e.target.files); e.target.value = ""; }}
+                />
               </div>
 
               <div className="messages">

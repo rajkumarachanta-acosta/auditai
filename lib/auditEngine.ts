@@ -23,6 +23,31 @@ export interface AsinCohort {
   returnRate: number;
 }
 
+// Pre-aggregated row for per-campaign table
+export interface CampaignRow {
+  name: string;
+  spend: number;
+  sales: number;
+  acos: number;
+  clicks: number;
+  impressions: number;
+  orders: number;
+  ctr: number;
+  cvr: number;
+}
+
+// Pre-aggregated row for per-ASIN table
+export interface AsinRow {
+  asin: string;
+  title: string;
+  brand: string;
+  orderedRevenue: number;
+  orderedUnits: number;
+  pageViews: number;
+  returnRate: number;
+  revenuePerView: number;
+}
+
 export interface AuditResult {
   score: number;
   scoreLabel: string;
@@ -38,6 +63,10 @@ export interface AuditResult {
   summary: AuditSummary;
   hasCampaignData: boolean;
   hasSalesData: boolean;
+  // Pre-aggregated tables for tabular chat responses
+  campaignTable: CampaignRow[];
+  asinTable: AsinRow[];
+  periodLabel: string;          // e.g. "Period A" or "Last 30 days"
 }
 
 export interface AuditSummary {
@@ -70,13 +99,46 @@ export interface RawData {
   searchTerm: Record<string, unknown>[];  // Bulk file: SP Search Term Report sheet
 }
 
+// ── User-configurable targets (with auto-detected defaults) ──
+export interface AuditTargets {
+  acosTarget: number;       // e.g. 0.30 = 30%
+  ctrBenchmark: number;     // e.g. 0.002 = 0.2%
+  cvrBenchmark: number;     // e.g. 0.05 = 5%
+  noSalesMinSpend: number;  // e.g. 30 = $30
+}
+
+export const DEFAULT_TARGETS: AuditTargets = {
+  acosTarget: 0.30,
+  ctrBenchmark: 0.002,
+  cvrBenchmark: 0.05,
+  noSalesMinSpend: 30,
+};
+
 // ── Safe number coercion ──
 function num(v: unknown): number {
   if (v === null || v === undefined || v === "") return 0;
-  const s = String(v).replace(/[$,%]/g, "").trim();
+  const s = String(v).replace(/[$,]/g, "").trim();
   const n = parseFloat(s);
   return isNaN(n) ? 0 : n;
 }
+
+// ── Percentage coercion — handles both "7.32%" (→0.0732) and "0.0732" (→0.0732) ──
+function pct(v: unknown): number {
+  if (v === null || v === undefined || v === "") return 0;
+  const s = String(v).trim();
+  // If it ends with % sign, strip it and divide by 100
+  if (s.endsWith("%")) {
+    const n = parseFloat(s.replace(/[%,$]/g, "").trim());
+    return isNaN(n) ? 0 : n / 100;
+  }
+  // If already a decimal (e.g. 0.0732 from some exports)
+  const n = parseFloat(s.replace(/[$,]/g, "").trim());
+  if (isNaN(n)) return 0;
+  // Amazon bulk files sometimes store ACOS as decimal (0.40 = 40%)
+  // and sometimes as whole number (40 = 40%) — heuristic: if > 1, divide by 100
+  return n > 1 ? n / 100 : n;
+}
+
 function str(v: unknown): string { return String(v ?? "").trim(); }
 
 // ── Column lookup — tries multiple aliases, case-insensitive ──
@@ -529,6 +591,50 @@ export function runAuditEngine(data: RawData): AuditResult {
     .sort((a, b) => b.impact - a.impact)
     .slice(0, 5);
 
+  // ── Build per-campaign table (aggregate keyword rows by campaign name) ──
+  const campAgg: Record<string, CampaignRow> = {};
+  for (const row of campaign) {
+    const name = str(col(row, "Campaign Name", "_ResolvedCampaignName")) || "Unknown";
+    if (!campAgg[name]) campAgg[name] = { name, spend: 0, sales: 0, acos: 0, clicks: 0, impressions: 0, orders: 0, ctr: 0, cvr: 0 };
+    campAgg[name].spend       += num(col(row, "Spend"));
+    campAgg[name].sales       += num(col(row, "Sales"));
+    campAgg[name].clicks      += num(col(row, "Clicks"));
+    campAgg[name].impressions += num(col(row, "Impressions"));
+    campAgg[name].orders      += num(col(row, "Orders"));
+  }
+  const campaignTable: CampaignRow[] = Object.values(campAgg).map(c => ({
+    ...c,
+    acos: c.sales > 0 ? c.spend / c.sales : 0,
+    ctr:  c.impressions > 0 ? c.clicks / c.impressions : 0,
+    cvr:  c.clicks > 0 ? c.orders / c.clicks : 0,
+  })).sort((a, b) => b.spend - a.spend);
+
+  // ── Build per-ASIN table ──
+  const asinAgg: Record<string, AsinRow> = {};
+  for (const row of sales) {
+    const asin = str(col(row, "ASIN"));
+    if (!asin || asin === "ASIN") continue;
+    if (!asinAgg[asin]) asinAgg[asin] = {
+      asin,
+      title: str(col(row, "Product Title")),
+      brand: str(col(row, "Brand")),
+      orderedRevenue: 0, orderedUnits: 0, pageViews: 0, returnRate: 0, revenuePerView: 0,
+    };
+    asinAgg[asin].orderedRevenue += num(col(row, "Ordered Revenue"));
+    asinAgg[asin].orderedUnits  += num(col(row, "Ordered Units"));
+    const returns = num(col(row, "Customer Returns"));
+    asinAgg[asin].returnRate = asinAgg[asin].orderedUnits > 0 ? returns / asinAgg[asin].orderedUnits : 0;
+  }
+  for (const row of traffic) {
+    const asin = str(col(row, "ASIN"));
+    if (asinAgg[asin]) asinAgg[asin].pageViews += num(col(row, "Featured Offer Page Views"));
+  }
+  const asinTable: AsinRow[] = Object.values(asinAgg).map(a => ({
+    ...a,
+    revenuePerView: a.pageViews > 0 ? a.orderedRevenue / a.pageViews : 0,
+  })).sort((a, b) => b.orderedRevenue - a.orderedRevenue);
+
+  // ── Assemble result ──
   return {
     score,
     scoreLabel,
@@ -544,5 +650,8 @@ export function runAuditEngine(data: RawData): AuditResult {
     summary,
     hasCampaignData,
     hasSalesData,
+    campaignTable,
+    asinTable,
+    periodLabel: "Current Period",
   };
 }
