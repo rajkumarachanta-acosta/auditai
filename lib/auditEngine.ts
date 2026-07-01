@@ -239,8 +239,8 @@ function runKeywordAudit(campaign: Record<string, unknown>[]): Finding[] {
     const sales  = num(col(kw, "Sales"));
     const clicks = num(col(kw, "Clicks"));
     const impr   = num(col(kw, "Impressions"));
-    const acos   = num(col(kw, "ACOS"));
-    const cvr    = num(col(kw, "Conversion Rate"));
+    const acos   = pct(col(kw, "ACOS"));
+    const cvr    = pct(col(kw, "Conversion Rate"));
     const kwText = str(col(kw, "Keyword Text"));
     const camp   = str(col(kw, "_ResolvedCampaignName", "Campaign Name (Informational only)", "Campaign Name"));
 
@@ -347,7 +347,7 @@ function runCampaignAudit(campaign: Record<string, unknown>[]): Finding[] {
   for (const c of campaigns) {
     const spend  = num(col(c, "Spend"));
     const sales  = num(col(c, "Sales"));
-    const acos   = num(col(c, "ACOS"));
+    const acos   = pct(col(c, "ACOS"));
     const budget = num(col(c, "Daily Budget"));
     const name   = str(col(c, "_ResolvedCampaignName", "Campaign Name (Informational only)", "Campaign Name")) || "Unknown Campaign";
     const key    = name.toLowerCase();

@@ -1,7 +1,9 @@
-// ── Chat Engine — matches questions to pre-computed audit data ──
-// LLM only formats; all facts come from auditEngine output
+// ── Chat Engine — Smart Analyst
+// Architecture: raw audit data → rich dynamic context → GPT-4 thinks → accurate answer
+// No keyword matching. No canned responses. Every answer computed from real data.
+// Future-proof: as new data sources are added to AuditResult, they flow through automatically.
 
-import { AuditResult, Finding, CampaignRow, AsinRow } from "./auditEngine";
+import { AuditResult, CampaignRow, AsinRow } from "./auditEngine";
 
 export interface ChatMessage {
   id: string;
@@ -10,573 +12,480 @@ export interface ChatMessage {
   timestamp: Date;
 }
 
-// ── Intent types ──
-type Intent =
-  | "waste"
-  | "keywords"
-  | "campaigns"
-  | "opportunities"
-  | "asins"
-  | "score"
-  | "searchterms"
-  | "powerpoint"
-  | "summary"
-  | "datainfo"
-  | "spend"
-  | "revenue"
-  | "returns"
-  | "ctr"
-  | "cvr"
-  | "impressions"
-  | "topkeywords"
-  | "topcampaigns"
-  | "brands"
-  | "table_campaigns"
-  | "table_asins"
-  | "compare"
-  | "unknown";
-
-// ── Multi-signal intent detection ──
-// Each intent has a list of signal patterns; the one with the most matches wins.
-// This avoids brittle single-regex matching.
-const INTENT_SIGNALS: { intent: Intent; patterns: RegExp[] }[] = [
-  {
-    intent: "powerpoint",
-    patterns: [/powerpoint/i, /pptx/i, /\bppt\b/i, /presentat/i, /slide/i, /export/i, /download.*report/i],
-  },
-  {
-    intent: "waste",
-    patterns: [/wast/i, /losing/i, /burn/i, /zero.?sales/i, /no.?sales/i, /bleed/i, /throw.*money/i, /money.*drain/i, /inefficien/i, /bad.*spend/i],
-  },
-  {
-    intent: "score",
-    patterns: [/\bscore\b/i, /health/i, /why.*score/i, /what.*score/i, /dragging/i, /improve.*score/i, /grade/i, /rating/i, /\b73\b/i, /\b74\b/i, /\b75\b/i, /how.*good/i],
-  },
-  {
-    intent: "keywords",
-    patterns: [/keyword/i, /\bbid\b/i, /\bacos\b/i, /\bctr\b/i, /pause.*keyword/i, /low.?ctr/i, /high.?acos/i, /which.*keyword/i, /best.?keyword/i, /worst.?keyword/i],
-  },
-  {
-    intent: "campaigns",
-    patterns: [/campaign/i, /\bbudget\b/i, /overspend/i, /concentration/i, /daily.?budget/i, /camp/i, /ad.?group/i],
-  },
-  {
-    intent: "opportunities",
-    patterns: [/opportunit/i, /\bgrow\b/i, /scale/i, /upside/i, /increase.?revenue/i, /potential/i, /unlock/i, /expand/i, /more.?sales/i, /improve.?revenue/i],
-  },
-  {
-    intent: "asins",
-    patterns: [/\basin\b/i, /product/i, /cash.?cow/i, /need.*love/i, /reduce.*pause/i, /cohort/i, /item/i, /sku/i, /which.*product/i, /top.?product/i, /best.?product/i],
-  },
-  {
-    intent: "searchterms",
-    patterns: [/search.?term/i, /search.?query/i, /negative/i, /wasted.?term/i, /query/i, /what.*people.*search/i, /customer.*search/i],
-  },
-  {
-    intent: "spend",
-    patterns: [/\bspend\b/i, /spending/i, /\bcost\b/i, /\bcpc\b/i, /how.?much.*spend/i, /total.?spend/i, /ad.?spend/i, /money.?spend/i],
-  },
-  {
-    intent: "revenue",
-    patterns: [/revenue/i, /\bsales\b/i, /\borders\b/i, /how.?much.*sell/i, /total.?sales/i, /how.?much.*mak/i, /earning/i, /income/i],
-  },
-  {
-    intent: "returns",
-    patterns: [/return/i, /refund/i, /return.?rate/i, /sent.?back/i, /customer.?return/i],
-  },
-  {
-    intent: "ctr",
-    patterns: [/\bctr\b/i, /click.?through/i, /click.?rate/i, /how.?many.*click/i, /click/i],
-  },
-  {
-    intent: "cvr",
-    patterns: [/\bcvr\b/i, /convers/i, /conversion.?rate/i, /how.?many.*order/i, /order.?rate/i],
-  },
-  {
-    intent: "impressions",
-    patterns: [/impression/i, /\bview\b/i, /\breach\b/i, /page.?view/i, /how.?many.*see/i, /visibility/i, /traffic/i],
-  },
-  {
-    intent: "topkeywords",
-    patterns: [/top.?keyword/i, /best.?keyword/i, /performing.?keyword/i, /most.?click/i, /highest.?sales.*keyword/i],
-  },
-  {
-    intent: "topcampaigns",
-    patterns: [/top.?campaign/i, /best.?campaign/i, /performing.?campaign/i, /most.?revenue.*campaign/i],
-  },
-  {
-    intent: "brands",
-    patterns: [/\bbrand\b/i, /carhartt/i, /wonderwink/i, /which.?brand/i, /brand.?perform/i],
-  },
-  {
-    intent: "table_campaigns",
-    patterns: [/table/i, /list.*campaign/i, /all.?campaign/i, /campaign.*list/i, /campaign.*breakdown/i, /show.?me.*campaign/i, /campaign.*detail/i, /campaign.*data/i, /4.?week/i, /weekly/i, /by.?campaign/i],
-  },
-  {
-    intent: "table_asins",
-    patterns: [/table/i, /list.*asin/i, /all.?asin/i, /asin.*list/i, /asin.*breakdown/i, /show.?me.*asin/i, /product.*table/i, /product.*list/i, /by.?asin/i, /asin.*detail/i],
-  },
-  {
-    intent: "compare",
-    patterns: [/compar/i, /vs\b/i, /versus/i, /week.?over.?week/i, /last.?week/i, /this.?week/i, /period.?a/i, /period.?b/i, /before.*after/i, /chang/i, /trend/i, /4.?week/i, /differ/i, /improve/i],
-  },
-  {
-    intent: "datainfo",
-    patterns: [/how.?many.?days/i, /date.?range/i, /time.?period/i, /how.?long/i, /data.?cover/i, /upload/i, /when.*data/i, /days.?of.?data/i, /\brows?\b/i, /file.*load/i, /what.*upload/i, /data.*span/i, /period/i, /how.?much.?data/i, /\bwhen\b.*\bfrom\b/i],
-  },
-  {
-    intent: "summary",
-    patterns: [/summary/i, /overview/i, /overall/i, /how.?are.?we/i, /\bstatus\b/i, /snapshot/i, /tell.?me.?about/i, /what.*look.?like/i, /how.*doing/i, /how.*perform/i, /give.?me.?a/i, /show.?me.?a/i, /quick.?look/i, /what.*going.?on/i, /\bhi\b/i, /\bhello\b/i, /\bhey\b/i, /start/i, /begin/i],
-  },
-];
-
-function detectIntent(q: string): Intent {
-  const scores = new Map<Intent, number>();
-
-  for (const { intent, patterns } of INTENT_SIGNALS) {
-    let score = 0;
-    for (const p of patterns) {
-      if (p.test(q)) score++;
-    }
-    if (score > 0) scores.set(intent, score);
-  }
-
-  if (scores.size === 0) return "unknown";
-
-  // Return the intent with the highest signal count
-  return [...scores.entries()].sort((a, b) => b[1] - a[1])[0][0];
-}
-
 // ── Formatters ──
 function fmt$(n: number): string {
-  if (n >= 1_000_000) return `$${(n / 1_000_000).toFixed(1)}M`;
-  if (n >= 1_000) return `$${(n / 1_000).toFixed(1)}K`;
-  return `$${n.toFixed(0)}`;
+  if (n >= 1_000_000) return `$${(n / 1_000_000).toFixed(2)}M`;
+  if (n >= 1_000)     return `$${(n / 1_000).toFixed(1)}K`;
+  return `$${n.toFixed(2)}`;
+}
+function fmtPct(n: number): string { return `${(n * 100).toFixed(2)}%`; }
+function fmtN(n: number): string   { return n.toLocaleString(); }
+
+// ── Build the richest possible context for GPT ──
+// This is the brain — everything the analyst needs to answer any question.
+// As new data sources are added (inventory, SB/SD, DSP, BSR, etc.) add them here.
+export function buildLLMContext(audit: AuditResult, question: string): string {
+  const {
+    summary, score, scoreLabel, spendEfficiency, structureQuality,
+    totalWaste, totalOpportunity, findings, asinCohorts,
+    topWaste, topOpportunities, campaignTable, asinTable,
+    hasCampaignData, hasSalesData, periodLabel,
+  } = audit;
+
+  // ── Account-level KPIs ──
+  const kpis = [
+    `Health Score: ${score}/100 (${scoreLabel})`,
+    `Spend Efficiency: ${spendEfficiency}/70 | Structure Quality: ${structureQuality}/30`,
+    `Period: ${periodLabel} (~${summary.reportingDays} days)`,
+    `Total Ad Spend: ${fmt$(summary.totalSpend)} | Ad Sales: ${fmt$(summary.totalSales)}`,
+    `ACOS: ${fmtPct(summary.avgAcos)} | CVR: ${fmtPct(summary.avgCvr)} | CTR: ${fmtPct(summary.avgCtr)}`,
+    `Impressions: ${fmtN(summary.totalImpressions)} | Clicks: ${fmtN(summary.totalClicks)} | Orders: ${fmtN(summary.totalOrders)}`,
+    `Campaigns: ${summary.campaignCount} | Keywords: ${summary.keywordCount}`,
+    `Ordered Revenue: ${fmt$(summary.totalOrderedRevenue)} | Ordered Units: ${fmtN(summary.totalOrderedUnits)}`,
+    `Page Views: ${fmtN(summary.totalPageViews)} | Return Rate: ${fmtPct(summary.returnRate)}`,
+    `Top Brand: ${summary.topBrand}`,
+    `Total Waste: ${fmt$(totalWaste)} | Monthly Opportunity: ${fmt$(totalOpportunity)}`,
+    `Data loaded: ${hasCampaignData ? "Bulk Campaign ✓" : "No campaign file"} | ${hasSalesData ? "Vendor Central Sales+Traffic ✓" : "No sales file"}`,
+  ].join("\n");
+
+  // ── All findings — full detail, not truncated ──
+  const criticalFindings = findings.filter(f => f.severity === "critical");
+  const highFindings     = findings.filter(f => f.severity === "high");
+  const wasteFindings    = findings.filter(f => f.category === "waste").sort((a, b) => b.impact - a.impact);
+  const oppFindings      = findings.filter(f => f.category === "opportunity").sort((a, b) => b.impact - a.impact);
+  const structFindings   = findings.filter(f => f.category === "structure");
+
+  const formatFindings = (list: typeof findings, limit = 20) =>
+    list.slice(0, limit).map((f, i) =>
+      `${i + 1}. [${f.severity.toUpperCase()}] ${f.title} | Impact: ${fmt$(f.impact)} | ${f.detail} | Action: ${f.action}`
+    ).join("\n") || "None";
+
+  // ── Campaign table — all campaigns with full metrics ──
+  const campLines = campaignTable.slice(0, 50).map((c, i) =>
+    `${i + 1}. "${c.name}" | Spend: ${fmt$(c.spend)} | Sales: ${fmt$(c.sales)} | ACOS: ${fmtPct(c.acos)} | Orders: ${c.orders} | Clicks: ${fmtN(c.clicks)} | CTR: ${fmtPct(c.ctr)} | CVR: ${fmtPct(c.cvr)}`
+  ).join("\n") || "No campaign data";
+
+  // ── ASIN table — all ASINs with full metrics ──
+  const asinLines = asinTable.slice(0, 50).map((a, i) =>
+    `${i + 1}. ${a.asin} | "${a.title.slice(0, 50)}" | Brand: ${a.brand} | Revenue: ${fmt$(a.orderedRevenue)} | Units: ${fmtN(a.orderedUnits)} | Page Views: ${fmtN(a.pageViews)} | Rev/View: $${a.revenuePerView.toFixed(3)} | Return Rate: ${fmtPct(a.returnRate)}`
+  ).join("\n") || "No ASIN data";
+
+  // ── ASIN cohorts ──
+  const cohortLines = asinCohorts.slice(0, 30).map(a =>
+    `${a.asin} [${a.cohort.toUpperCase()}] | Revenue: ${fmt$(a.orderedRevenue)} | Units: ${fmtN(a.orderedUnits)} | Rev/View: $${a.revenuePerView.toFixed(3)} | Returns: ${fmtPct(a.returnRate)}`
+  ).join("\n") || "No cohort data";
+
+  // ── Waste by campaign (computed) ──
+  const wasteByAsin = asinTable
+    .filter(a => a.orderedRevenue === 0 && a.pageViews > 0)
+    .sort((a, b) => b.pageViews - a.pageViews)
+    .slice(0, 20)
+    .map((a, i) => `${i + 1}. ${a.asin} "${a.title.slice(0, 40)}" | Views: ${fmtN(a.pageViews)} | $0 revenue`)
+    .join("\n");
+
+  const highAcosCampaigns = campaignTable
+    .filter(c => c.sales > 0 && c.acos > 0.5)
+    .sort((a, b) => b.spend - a.spend)
+    .slice(0, 20)
+    .map((c, i) => `${i + 1}. "${c.name}" | ACOS: ${fmtPct(c.acos)} | Waste: ${fmt$(c.spend - c.sales * 0.4)} | Spend: ${fmt$(c.spend)}`)
+    .join("\n");
+
+  const zeroSalesCampaigns = campaignTable
+    .filter(c => c.spend > 0 && c.sales === 0)
+    .sort((a, b) => b.spend - a.spend)
+    .slice(0, 20)
+    .map((c, i) => `${i + 1}. "${c.name}" | Spend: ${fmt$(c.spend)} | $0 sales`)
+    .join("\n");
+
+  return `You are a world-class Amazon advertising analyst AI. You have full access to the account data below. Answer the user's question accurately, specifically, and insightfully based ONLY on this data.
+
+Rules:
+- Compute answers directly from the tables below — do not guess or hallucinate
+- Be specific with numbers, names, and ASINs from the data
+- If asked for a list (e.g. "top 20"), provide exactly that many items from the data
+- Format responses clearly — use numbered lists for rankings, bullet points for recommendations
+- Always end with 1-2 concrete, prioritized next actions
+- If data is not available to answer part of the question, say so clearly
+
+═══════════════════════════════════════
+ACCOUNT KPIs
+═══════════════════════════════════════
+${kpis}
+
+═══════════════════════════════════════
+FINDINGS SUMMARY: ${findings.length} total (${criticalFindings.length} critical, ${highFindings.length} high)
+═══════════════════════════════════════
+WASTE FINDINGS (${wasteFindings.length} total, sorted by impact):
+${formatFindings(wasteFindings, 25)}
+
+OPPORTUNITY FINDINGS (${oppFindings.length} total):
+${formatFindings(oppFindings, 15)}
+
+STRUCTURE FINDINGS (${structFindings.length} total):
+${formatFindings(structFindings, 10)}
+
+═══════════════════════════════════════
+ALL CAMPAIGNS (${campaignTable.length} total, sorted by spend):
+═══════════════════════════════════════
+${campLines}
+
+═══════════════════════════════════════
+ZERO-SALES CAMPAIGNS (spending with no return):
+═══════════════════════════════════════
+${zeroSalesCampaigns || "None"}
+
+═══════════════════════════════════════
+HIGH-ACOS CAMPAIGNS (>50% ACOS):
+═══════════════════════════════════════
+${highAcosCampaigns || "None"}
+
+═══════════════════════════════════════
+ALL ASINs (${asinTable.length} total, sorted by revenue):
+═══════════════════════════════════════
+${asinLines}
+
+═══════════════════════════════════════
+ASINs WITH PAGE VIEWS BUT ZERO REVENUE (possible ad waste):
+═══════════════════════════════════════
+${wasteByAsin || "None"}
+
+═══════════════════════════════════════
+ASIN COHORT ANALYSIS (${asinCohorts.length} total):
+═══════════════════════════════════════
+${cohortLines}
+
+═══════════════════════════════════════
+USER QUESTION: ${question}
+═══════════════════════════════════════
+
+Answer now. Be specific, use exact numbers and names from the data above. If the user asks for "top N" give exactly N items.`;
 }
 
-function fmtPct(n: number): string {
-  return `${(n * 100).toFixed(1)}%`;
+// ── Fallback response when no API key — computed from data, not canned ──
+// This computes a direct answer from the audit data without LLM.
+// It handles the most common question types intelligently.
+export function buildLocalResponse(audit: AuditResult, _intentParam: string, question: string): string {
+  const q = question.toLowerCase();
+  const {
+    summary, score, scoreLabel, spendEfficiency, structureQuality,
+    totalWaste, totalOpportunity, findings, asinCohorts,
+    topWaste, topOpportunities, campaignTable, asinTable,
+  } = audit;
+
+  const fmt  = fmt$;
+  const pct  = fmtPct;
+  const n    = fmtN;
+
+  // ── Helper: HTML finding card ──
+  const fc = (title: string, detail: string, action: string, color = "#ef4444", cls = "") =>
+    `<div class="fc ${cls}"><div class="fc-title" style="color:${color}">${title}</div><div class="fc-detail">${detail}</div><div class="fc-action">▶ ${action}</div></div>`;
+
+  // ── Helper: extract number from question ("top 20" → 20) ──
+  const extractN = (text: string, def = 10): number => {
+    const m = text.match(/\b(\d+)\b/);
+    return m ? Math.min(parseInt(m[1]), 50) : def;
+  };
+
+  // ── Helper: campaign table HTML ──
+  const campTableHtml = (rows: CampaignRow[], limit: number) => {
+    const shown = rows.slice(0, limit);
+    if (!shown.length) return "<div class='fc'><div class='fc-detail'>No campaign data available.</div></div>";
+    const TH = (l: string, a = "right") => `<th style="padding:5px 8px;border-bottom:2px solid #e5e7eb;text-align:${a};white-space:nowrap;color:#57606a;font-weight:600">${l}</th>`;
+    const TD = (v: string, a = "right", c = "") => `<td style="padding:4px 8px;border-bottom:1px solid #f0f0f0;text-align:${a};${c ? `color:${c}` : ""}">${v}</td>`;
+    const acosClr = (a: number) => a > 0.6 ? "#ef4444" : a > 0.35 ? "#f97316" : "#166534";
+    return `<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:12px;margin-top:8px">
+<thead><tr>${TH("Campaign","left")}${TH("Spend")}${TH("Sales")}${TH("ACOS")}${TH("Orders")}${TH("Clicks")}${TH("CTR")}${TH("CVR")}</tr></thead>
+<tbody>${shown.map(c => `<tr>
+  ${TD(`<span style="font-weight:500">${c.name.slice(0,45)}${c.name.length>45?"…":""}</span>`,"left")}
+  ${TD(fmt(c.spend))}${TD(fmt(c.sales))}
+  ${TD(pct(c.acos),"right",acosClr(c.acos))}
+  ${TD(String(c.orders))}${TD(n(c.clicks))}${TD(pct(c.ctr))}${TD(pct(c.cvr))}
+</tr>`).join("")}</tbody></table></div>
+${rows.length > limit ? `<div style="font-size:11px;color:#57606a;margin-top:4px">Showing ${limit} of ${rows.length} campaigns</div>` : ""}`;
+  };
+
+  // ── Helper: ASIN table HTML ──
+  const asinTableHtml = (rows: AsinRow[], limit: number) => {
+    const shown = rows.slice(0, limit);
+    if (!shown.length) return "<div class='fc'><div class='fc-detail'>No ASIN data available. Upload Vendor Central files.</div></div>";
+    const TH = (l: string, a = "right") => `<th style="padding:5px 8px;border-bottom:2px solid #e5e7eb;text-align:${a};white-space:nowrap;color:#57606a;font-weight:600">${l}</th>`;
+    const TD = (v: string, a = "right", c = "") => `<td style="padding:4px 8px;border-bottom:1px solid #f0f0f0;text-align:${a};${c ? `color:${c}` : ""}">${v}</td>`;
+    return `<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:12px;margin-top:8px">
+<thead><tr>${TH("ASIN","left")}${TH("Product","left")}${TH("Brand","left")}${TH("Revenue")}${TH("Units")}${TH("Views")}${TH("Rev/View")}${TH("Returns")}</tr></thead>
+<tbody>${shown.map(a => `<tr>
+  ${TD(`<code style="font-size:11px">${a.asin}</code>`,"left")}
+  ${TD(`<span style="font-weight:500">${a.title.slice(0,35)}${a.title.length>35?"…":""}</span>`,"left")}
+  ${TD(a.brand,"left")}
+  ${TD(fmt(a.orderedRevenue))}${TD(n(a.orderedUnits))}${TD(n(a.pageViews))}
+  ${TD(`$${a.revenuePerView.toFixed(3)}`)}
+  ${TD(pct(a.returnRate),"right",a.returnRate>0.1?"#ef4444":"")}
+</tr>`).join("")}</tbody></table></div>
+${rows.length > limit ? `<div style="font-size:11px;color:#57606a;margin-top:4px">Showing ${limit} of ${rows.length} ASINs</div>` : ""}`;
+  };
+
+  // ══════════════════════════════════════════════════
+  // SMART ROUTING — read the question, compute the answer
+  // ══════════════════════════════════════════════════
+
+  // PowerPoint
+  if (/powerpoint|pptx|ppt|slide|presentat/i.test(q)) return "__POWERPOINT__";
+
+  // ── ASIN waste questions ──
+  if (/asin.*wast|wast.*asin|asin.*budget|budget.*asin|asin.*spend.*no|asin.*zero|asin.*poor/i.test(q)) {
+    const limit = extractN(q, 20);
+    const wasteful = asinTable
+      .filter(a => a.pageViews > 100 && a.orderedRevenue < 100)
+      .sort((a, b) => b.pageViews - a.pageViews)
+      .slice(0, limit);
+    const lowConvert = asinCohorts
+      .filter(a => a.cohort === "reduce_pause")
+      .slice(0, limit);
+    const list = wasteful.length ? wasteful : lowConvert.map(a => asinTable.find(r => r.asin === a.asin)).filter(Boolean) as AsinRow[];
+    return `Top ${list.length} ASINs burning budget with poor return:<br>${asinTableHtml(list, limit)}
+      <br><strong>Action:</strong> Pause ad spend on zero-revenue ASINs. Redirect budget to Cash Cows.`;
+  }
+
+  // ── Campaign waste / zero sales ──
+  if (/campaign.*wast|wast.*campaign|zero.*sales.*campaign|campaign.*zero|campaign.*no.*sales/i.test(q)) {
+    const limit = extractN(q, 20);
+    const zero  = campaignTable.filter(c => c.spend > 0 && c.sales === 0).sort((a, b) => b.spend - a.spend);
+    return `${zero.length} campaigns spending with zero sales — total waste: <strong>${fmt(zero.reduce((s,c)=>s+c.spend,0))}</strong>:<br>
+      ${campTableHtml(zero, limit)}`;
+  }
+
+  // ── High ACOS campaigns ──
+  if (/high.*acos|acos.*high|acos.*above|above.*acos|campaign.*acos/i.test(q)) {
+    const limit  = extractN(q, 20);
+    const threshold = q.match(/(\d+)\s*%/) ? parseInt(q.match(/(\d+)\s*%/)![1]) / 100 : 0.5;
+    const high   = campaignTable.filter(c => c.sales > 0 && c.acos > threshold).sort((a, b) => b.spend - a.spend);
+    return `${high.length} campaigns above ${pct(threshold)} ACOS:<br>${campTableHtml(high, limit)}`;
+  }
+
+  // ── Top/best performing campaigns ──
+  if (/top.*campaign|best.*campaign|perform.*campaign|campaign.*perform|campaign.*revenue|campaign.*sales/i.test(q)) {
+    const limit = extractN(q, 20);
+    const best  = [...campaignTable].filter(c => c.sales > 0).sort((a, b) => b.sales - a.sales);
+    return `Top ${Math.min(limit, best.length)} campaigns by sales:<br>${campTableHtml(best, limit)}`;
+  }
+
+  // ── All campaigns table ──
+  if (/all.*campaign|campaign.*list|campaign.*table|list.*campaign|show.*campaign|campaign.*breakdown/i.test(q)) {
+    const limit = extractN(q, 30);
+    return `All ${campaignTable.length} campaigns:<br>${campTableHtml(campaignTable, limit)}`;
+  }
+
+  // ── Top ASINs by revenue ──
+  if (/top.*asin|best.*asin|asin.*revenue|revenue.*asin|top.*product|best.*product/i.test(q)) {
+    const limit = extractN(q, 20);
+    return `Top ${Math.min(limit, asinTable.length)} ASINs by revenue:<br>${asinTableHtml(asinTable, limit)}`;
+  }
+
+  // ── All ASINs table ──
+  if (/all.*asin|asin.*list|asin.*table|list.*asin|show.*asin|asin.*breakdown|product.*table/i.test(q)) {
+    const limit = extractN(q, 30);
+    return `All ${asinTable.length} ASINs:<br>${asinTableHtml(asinTable, limit)}`;
+  }
+
+  // ── Waste / budget burning ──
+  if (/wast|burn|bleed|zero.?sal|no.?sal|inefficien|losing.*money|money.*drain/i.test(q)) {
+    const lines = topWaste.slice(0, 5).map(f => fc(f.title, f.detail, f.action, f.severity === "critical" ? "#ef4444" : "#f97316")).join("");
+    return `<strong>${fmt(totalWaste)}</strong> wasted this period — <strong>${fmt(totalWaste*12)}/year</strong> annualized:<br>${lines}`;
+  }
+
+  // ── Keywords ──
+  if (/keyword|bid|pause.*kw|kw.*pause/i.test(q)) {
+    const kwWaste  = findings.filter(f => f.category === "waste" && f.id.startsWith("kw-")).slice(0, 8);
+    const limit    = extractN(q, 10);
+    const lines    = kwWaste.slice(0, limit).map(f => fc(f.title, f.detail, f.action)).join("");
+    return `<strong>${findings.filter(f=>f.id.startsWith("kw-")).length} keyword issues</strong> found:<br>${lines || fc("No critical keyword issues","All keywords within thresholds","Monitor weekly")}`;
+  }
+
+  // ── Score ──
+  if (/score|health|grade|rating|why.*low|dragging/i.test(q)) {
+    const draggers = findings.filter(f => f.severity === "critical" || f.severity === "high").slice(0, 4);
+    const lines    = draggers.map(f => fc(f.title, f.detail, f.action)).join("");
+    const gain     = Math.min(27, findings.filter(f=>f.severity==="critical").length*5 + findings.filter(f=>f.severity==="high").length*2);
+    return `Health score <strong>${score}/100 — ${scoreLabel}</strong>
+      <div class="chip-row">
+        <div class="chip-stat ${spendEfficiency<50?"red":"yellow"}"><span>${spendEfficiency}</span>Spend /70</div>
+        <div class="chip-stat ${structureQuality<20?"red":"yellow"}"><span>${structureQuality}</span>Structure /30</div>
+        <div class="chip-stat red"><span>${findings.filter(f=>f.severity==="critical").length}</span>Critical</div>
+      </div>
+      ${lines}<br><strong>Fix critical issues → estimated: ${Math.min(100,score+gain)}/100</strong>`;
+  }
+
+  // ── Opportunities / growth ──
+  if (/opportunit|grow|scale|upside|potential|increase|expand|more.*sal/i.test(q)) {
+    const limit = extractN(q, 8);
+    const lines = topOpportunities.slice(0, limit).map(f => fc(f.title, f.detail, f.action, "#166534", "opp")).join("");
+    return `<strong>${findings.filter(f=>f.category==="opportunity").length} growth opportunities</strong> — <strong>${fmt(totalOpportunity)}/month</strong> upside:<br>${lines}`;
+  }
+
+  // ── ASINs / products / cohorts ──
+  if (/asin|product|cohort|cash.?cow|need.*love|reduce.*pause|item|sku/i.test(q)) {
+    const cows   = asinCohorts.filter(a => a.cohort === "cash_cow");
+    const love   = asinCohorts.filter(a => a.cohort === "need_love");
+    const reduce = asinCohorts.filter(a => a.cohort === "reduce_pause");
+    const limit  = extractN(q, 10);
+    return `ASIN cohort analysis — <strong>${asinCohorts.length} ASINs</strong>:
+      <div class="chip-row">
+        <div class="chip-stat green"><span>${cows.length}</span>Cash Cows</div>
+        <div class="chip-stat yellow"><span>${love.length}</span>Need Love</div>
+        <div class="chip-stat red"><span>${reduce.length}</span>Reduce/Pause</div>
+      </div>
+      ${asinTableHtml(asinTable, limit)}`;
+  }
+
+  // ── Search terms ──
+  if (/search.?term|search.?query|negative|query/i.test(q)) {
+    const stWaste = findings.filter(f => f.id.startsWith("st-waste-")).slice(0, 5);
+    const stOpp   = findings.filter(f => f.id.startsWith("st-opp-") || f.id.startsWith("st-expand-")).slice(0, 5);
+    const lines   = [...stWaste, ...stOpp].map(f => fc(f.title, f.detail, f.action, f.category==="opportunity"?"#166534":"#ef4444", f.category==="opportunity"?"opp":"")).join("");
+    return `Search term analysis: <strong>${stWaste.length} wasted</strong> · <strong>${stOpp.length} opportunities</strong>:<br>${lines || fc("Upload Search Term Report","Add the SP Search Term Report sheet for query-level analysis","Upload bulk file with search term data","#3b82d4")}`;
+  }
+
+  // ── Spend ──
+  if (/spend|cost|cpc|how.?much.*pay|ad.*budget/i.test(q)) {
+    const wasteRatio = (summary.wasteRatio * 100).toFixed(1);
+    const cpc = summary.totalClicks > 0 ? summary.totalSpend / summary.totalClicks : 0;
+    return `Ad spend analysis — <strong>${fmt(summary.totalSpend)}</strong> total:
+      <div class="chip-row">
+        <div class="chip-stat blue"><span>${fmt(summary.totalSpend)}</span>Total Spend</div>
+        <div class="chip-stat red"><span>${fmt(totalWaste)}</span>Wasted (${wasteRatio}%)</div>
+        <div class="chip-stat green"><span>${fmt(summary.totalSales)}</span>Ad Sales</div>
+      </div>
+      Avg CPC: <strong>$${cpc.toFixed(2)}</strong> · ACOS: <strong>${pct(summary.avgAcos)}</strong><br>
+      ${topWaste[0] ? fc(`Biggest waste: ${topWaste[0].title}`, topWaste[0].detail, topWaste[0].action) : ""}`;
+  }
+
+  // ── Revenue / sales ──
+  if (/revenue|sales|order|earning|income|how.?much.*mak|how.?much.*sell/i.test(q)) {
+    const adShare = summary.totalOrderedRevenue > 0 ? ((summary.totalSales / summary.totalOrderedRevenue) * 100).toFixed(1) : "N/A";
+    return `Revenue overview:
+      <div class="chip-row">
+        <div class="chip-stat green"><span>${fmt(summary.totalOrderedRevenue)}</span>Total Revenue</div>
+        <div class="chip-stat blue"><span>${fmt(summary.totalSales)}</span>Ad Sales (${adShare}%)</div>
+        <div class="chip-stat blue"><span>${n(summary.totalOrderedUnits)}</span>Units</div>
+      </div>
+      ACOS: <strong>${pct(summary.avgAcos)}</strong> · CVR: <strong>${pct(summary.avgCvr)}</strong> · Returns: <strong>${pct(summary.returnRate)}</strong><br>
+      ${topOpportunities[0] ? fc(`Top opportunity: ${topOpportunities[0].title}`, topOpportunities[0].detail, topOpportunities[0].action, "#166534", "opp") : ""}`;
+  }
+
+  // ── CTR ──
+  if (/\bctr\b|click.?through|click.?rate/i.test(q)) {
+    const lowCtr = findings.filter(f => f.id.startsWith("kw-ctr-")).slice(0, 5);
+    return `CTR overview: Avg <strong>${pct(summary.avgCtr)}</strong> (benchmark ~0.35%)<br>
+      <div class="chip-row">
+        <div class="chip-stat ${summary.avgCtr<0.002?"red":"yellow"}"><span>${pct(summary.avgCtr)}</span>Avg CTR</div>
+        <div class="chip-stat blue"><span>${n(summary.totalImpressions)}</span>Impressions</div>
+        <div class="chip-stat blue"><span>${n(summary.totalClicks)}</span>Clicks</div>
+      </div>
+      ${lowCtr.map(f=>fc(f.title,f.detail,f.action,"#f97316")).join("")}`;
+  }
+
+  // ── CVR ──
+  if (/\bcvr\b|convers/i.test(q)) {
+    return `CVR overview: Avg <strong>${pct(summary.avgCvr)}</strong> (Amazon avg ~10-13%)<br>
+      <div class="chip-row">
+        <div class="chip-stat ${summary.avgCvr<0.05?"red":"yellow"}"><span>${pct(summary.avgCvr)}</span>Avg CVR</div>
+        <div class="chip-stat blue"><span>${n(summary.totalClicks)}</span>Clicks</div>
+        <div class="chip-stat blue"><span>${n(summary.totalOrders)}</span>Orders</div>
+      </div>
+      ${summary.avgCvr < 0.05 ? "Low CVR — review product listings, pricing, reviews, and images." : summary.avgCvr < 0.10 ? "Moderate CVR — room to improve." : "Strong CVR — scale winning campaigns."}`;
+  }
+
+  // ── Returns ──
+  if (/return|refund/i.test(q)) {
+    return `Return rate: <strong>${pct(summary.returnRate)}</strong>
+      <div class="chip-row">
+        <div class="chip-stat ${summary.returnRate>0.1?"red":summary.returnRate>0.05?"yellow":"green"}"><span>${pct(summary.returnRate)}</span>Return Rate</div>
+        <div class="chip-stat blue"><span>${n(summary.totalOrderedUnits)}</span>Units Ordered</div>
+      </div>
+      ${summary.returnRate > 0.1 ? "⚠️ Above 10% — review listings, size charts, product descriptions." : summary.returnRate > 0.05 ? "Moderate — monitor by ASIN for spikes." : "Healthy — below 5%."}`;
+  }
+
+  // ── Impressions / traffic / visibility ──
+  if (/impression|visibility|reach|traffic|page.?view/i.test(q)) {
+    return `Impressions & visibility:
+      <div class="chip-row">
+        <div class="chip-stat blue"><span>${(summary.totalImpressions/1000).toFixed(0)}K</span>Ad Impressions</div>
+        <div class="chip-stat blue"><span>${(summary.totalPageViews/1000).toFixed(0)}K</span>Page Views</div>
+        <div class="chip-stat yellow"><span>${pct(summary.avgCtr)}</span>CTR</div>
+      </div>
+      ${n(summary.totalImpressions)} impressions across ${summary.keywordCount} keywords and ${summary.campaignCount} campaigns.`;
+  }
+
+  // ── Brand ──
+  if (/brand/i.test(q)) {
+    const brandRevMap: Record<string, number> = {};
+    asinTable.forEach(a => { brandRevMap[a.brand] = (brandRevMap[a.brand]??0) + a.orderedRevenue; });
+    const sorted = Object.entries(brandRevMap).sort((a,b)=>b[1]-a[1]).slice(0,10);
+    const lines  = sorted.map(([b,r],i) => `<div class="fc opp"><div class="fc-title">${i+1}. ${b}</div><div class="fc-detail">Revenue: ${fmt(r)}</div></div>`).join("");
+    return `Brand breakdown — top brand: <strong>${summary.topBrand}</strong>:<br>${lines || fc("Upload Vendor Central sales data","Brand breakdown requires sales data","Upload Sales by ASIN file","#3b82d4")}`;
+  }
+
+  // ── Data info ──
+  if (/how.?many.?day|date.?range|time.?period|how.?long|data.?cover|upload|period|how.?much.?data/i.test(q)) {
+    return `Data loaded — approximately <strong>${summary.reportingDays} days</strong>:
+      <div class="chip-row">
+        <div class="chip-stat blue"><span>${summary.campaignCount}</span>Campaigns</div>
+        <div class="chip-stat blue"><span>${summary.keywordCount}</span>Keywords</div>
+        <div class="chip-stat green"><span>${summary.asinCount}</span>ASINs</div>
+      </div>
+      Ad spend: <strong>${fmt(summary.totalSpend)}</strong> · Revenue: <strong>${fmt(summary.totalOrderedRevenue)}</strong>`;
+  }
+
+  // ── Default: rich summary ──
+  // When we don't know the question — give everything useful, not a dead-end
+  return `Here's your account at a glance:
+    <div class="chip-row">
+      <div class="chip-stat ${score<65?"red":score<80?"yellow":"green"}"><span>${score}</span>Health Score</div>
+      <div class="chip-stat red"><span>${fmt(totalWaste)}</span>Waste</div>
+      <div class="chip-stat green"><span>${fmt(totalOpportunity)}</span>Opp/mo</div>
+      <div class="chip-stat blue"><span>${fmt(summary.totalOrderedRevenue)}</span>Revenue</div>
+    </div>
+    ACOS: <strong>${pct(summary.avgAcos)}</strong> · CVR: <strong>${pct(summary.avgCvr)}</strong> · CTR: <strong>${pct(summary.avgCtr)}</strong><br>
+    ${topWaste[0] ? `Top waste: <strong>${topWaste[0].title}</strong> — ${topWaste[0].action}<br>` : ""}
+    ${topOpportunities[0] ? `Top opportunity: <strong>${topOpportunities[0].title}</strong> — ${topOpportunities[0].action}<br>` : ""}
+    <br>Ask me anything — "top 20 wasted campaigns", "which ASINs to pause", "show all campaigns in a table", "compare periods", "why is my score low"`;
 }
 
-function severityColor(s: Finding["severity"]): string {
-  return { critical: "#ef4444", high: "#f97316", medium: "#f59e0b", low: "#6b7280" }[s];
+export function getIntent(question: string): string {
+  return "smart"; // intent detection is no longer needed — LLM and smart routing handle everything
 }
 
-function fc(title: string, detail: string, action: string, color = "#ef4444", cls = ""): string {
-  return `<div class="fc ${cls}"><div class="fc-title" style="color:${color}">${title}</div><div class="fc-detail">${detail}</div><div class="fc-action">▶ ${action}</div></div>`;
-}
-
-// ── HTML table builder ──
-const TABLE_STYLE = `style="width:100%;border-collapse:collapse;font-size:12px;margin-top:8px"`;
-const TH = (label: string, align = "right") =>
-  `<th style="padding:5px 8px;border-bottom:2px solid #e5e7eb;text-align:${align};white-space:nowrap;color:#57606a;font-weight:600">${label}</th>`;
-const TD = (val: string, align = "right", color = "") =>
-  `<td style="padding:4px 8px;border-bottom:1px solid #f0f0f0;text-align:${align};${color ? `color:${color}` : ""}">${val}</td>`;
-const acosColor = (acos: number) => acos > 0.6 ? "#ef4444" : acos > 0.35 ? "#f97316" : "#166534";
-
-function campaignTableHtml(rows: CampaignRow[], limit = 20): string {
-  const shown = rows.slice(0, limit);
-  return `<div style="overflow-x:auto"><table ${TABLE_STYLE}>
-<thead><tr>
-  ${TH("Campaign", "left")}
-  ${TH("Spend")}${TH("Sales")}${TH("ACOS")}${TH("Orders")}${TH("Clicks")}${TH("CTR")}${TH("CVR")}
-</tr></thead>
-<tbody>
-${shown.map(c => `<tr>
-  ${TD(`<span style="font-weight:500">${c.name.slice(0, 45)}${c.name.length > 45 ? "…" : ""}</span>`, "left")}
-  ${TD(fmt$(c.spend))}
-  ${TD(fmt$(c.sales))}
-  ${TD(fmtPct(c.acos), "right", acosColor(c.acos))}
-  ${TD(c.orders.toLocaleString())}
-  ${TD(c.clicks.toLocaleString())}
-  ${TD(fmtPct(c.ctr))}
-  ${TD(fmtPct(c.cvr))}
-</tr>`).join("")}
-</tbody>
-</table></div>
-${rows.length > limit ? `<div style="margin-top:4px;font-size:11px;color:#57606a">Showing top ${limit} of ${rows.length} campaigns by spend</div>` : ""}`;
-}
-
-function asinTableHtml(rows: AsinRow[], limit = 25): string {
-  const shown = rows.slice(0, limit);
-  return `<div style="overflow-x:auto"><table ${TABLE_STYLE}>
-<thead><tr>
-  ${TH("ASIN", "left")}${TH("Product", "left")}${TH("Brand", "left")}
-  ${TH("Revenue")}${TH("Units")}${TH("Page Views")}${TH("Rev/View")}${TH("Return %")}
-</tr></thead>
-<tbody>
-${shown.map(a => `<tr>
-  ${TD(`<code style="font-size:11px">${a.asin}</code>`, "left")}
-  ${TD(`<span style="font-weight:500">${a.title.slice(0, 40)}${a.title.length > 40 ? "…" : ""}</span>`, "left")}
-  ${TD(a.brand, "left")}
-  ${TD(fmt$(a.orderedRevenue))}
-  ${TD(a.orderedUnits.toLocaleString())}
-  ${TD(a.pageViews.toLocaleString())}
-  ${TD(`$${a.revenuePerView.toFixed(2)}`)}
-  ${TD(fmtPct(a.returnRate), "right", a.returnRate > 0.1 ? "#ef4444" : "")}
-</tr>`).join("")}
-</tbody>
-</table></div>
-${rows.length > limit ? `<div style="margin-top:4px;font-size:11px;color:#57606a">Showing top ${limit} of ${rows.length} ASINs by revenue</div>` : ""}`;
-}
-
-// ── Period comparison table (two AuditResult objects) ──
-export interface PeriodDiff {
-  metric: string;
-  periodA: string;
-  periodB: string;
-  delta: string;
-  direction: "up" | "down" | "neutral";
-  goodWhenUp: boolean;
-}
-
+// ── Period comparison table ──
 export function buildComparisonTable(a: AuditResult, b: AuditResult): string {
-  const p = (n: number) => `${(n * 100).toFixed(1)}%`;
+  const p = (n: number) => fmtPct(n);
   const f = (n: number) => fmt$(n);
+  const sign = (n: number) => n > 0 ? "+" : "";
 
-  const rows: PeriodDiff[] = [
-    { metric: "Health Score",    periodA: `${a.score}/100`,       periodB: `${b.score}/100`,       delta: `${b.score - a.score > 0 ? "+" : ""}${b.score - a.score}`,                              direction: b.score > a.score ? "up" : b.score < a.score ? "down" : "neutral", goodWhenUp: true },
-    { metric: "Total Spend",     periodA: f(a.summary.totalSpend), periodB: f(b.summary.totalSpend), delta: `${b.summary.totalSpend > a.summary.totalSpend ? "+" : ""}${f(b.summary.totalSpend - a.summary.totalSpend)}`, direction: b.summary.totalSpend > a.summary.totalSpend ? "up" : "down", goodWhenUp: false },
-    { metric: "Total Sales",     periodA: f(a.summary.totalSales), periodB: f(b.summary.totalSales), delta: `${b.summary.totalSales > a.summary.totalSales ? "+" : ""}${f(b.summary.totalSales - a.summary.totalSales)}`, direction: b.summary.totalSales > a.summary.totalSales ? "up" : "down", goodWhenUp: true },
-    { metric: "ACOS",            periodA: p(a.summary.avgAcos),   periodB: p(b.summary.avgAcos),   delta: `${(b.summary.avgAcos - a.summary.avgAcos) > 0 ? "+" : ""}${((b.summary.avgAcos - a.summary.avgAcos) * 100).toFixed(1)}%`, direction: b.summary.avgAcos > a.summary.avgAcos ? "up" : "down", goodWhenUp: false },
-    { metric: "CVR",             periodA: p(a.summary.avgCvr),    periodB: p(b.summary.avgCvr),    delta: `${(b.summary.avgCvr - a.summary.avgCvr) > 0 ? "+" : ""}${((b.summary.avgCvr - a.summary.avgCvr) * 100).toFixed(1)}%`, direction: b.summary.avgCvr > a.summary.avgCvr ? "up" : "down", goodWhenUp: true },
-    { metric: "CTR",             periodA: p(a.summary.avgCtr),    periodB: p(b.summary.avgCtr),    delta: `${(b.summary.avgCtr - a.summary.avgCtr) > 0 ? "+" : ""}${((b.summary.avgCtr - a.summary.avgCtr) * 100).toFixed(1)}%`, direction: b.summary.avgCtr > a.summary.avgCtr ? "up" : "down", goodWhenUp: true },
-    { metric: "Total Waste",     periodA: f(a.totalWaste),        periodB: f(b.totalWaste),        delta: `${b.totalWaste > a.totalWaste ? "+" : ""}${f(b.totalWaste - a.totalWaste)}`,             direction: b.totalWaste > a.totalWaste ? "up" : "down", goodWhenUp: false },
-    { metric: "Ordered Revenue", periodA: f(a.summary.totalOrderedRevenue), periodB: f(b.summary.totalOrderedRevenue), delta: `${b.summary.totalOrderedRevenue > a.summary.totalOrderedRevenue ? "+" : ""}${f(b.summary.totalOrderedRevenue - a.summary.totalOrderedRevenue)}`, direction: b.summary.totalOrderedRevenue > a.summary.totalOrderedRevenue ? "up" : "down", goodWhenUp: true },
-    { metric: "Return Rate",     periodA: p(a.summary.returnRate), periodB: p(b.summary.returnRate), delta: `${(b.summary.returnRate - a.summary.returnRate) > 0 ? "+" : ""}${((b.summary.returnRate - a.summary.returnRate) * 100).toFixed(1)}%`, direction: b.summary.returnRate > a.summary.returnRate ? "up" : "down", goodWhenUp: false },
+  const rows = [
+    { metric: "Health Score",    a: `${a.score}/100`,    b: `${b.score}/100`,    delta: b.score - a.score,                                    fmt: (d:number)=>`${sign(d)}${d}`,                    good: (d:number)=>d>0 },
+    { metric: "Ad Spend",        a: f(a.summary.totalSpend),  b: f(b.summary.totalSpend),  delta: b.summary.totalSpend - a.summary.totalSpend,       fmt: (d:number)=>`${sign(d)}${f(Math.abs(d))}`,       good: (d:number)=>d<0 },
+    { metric: "Ad Sales",        a: f(a.summary.totalSales),  b: f(b.summary.totalSales),  delta: b.summary.totalSales - a.summary.totalSales,       fmt: (d:number)=>`${sign(d)}${f(Math.abs(d))}`,       good: (d:number)=>d>0 },
+    { metric: "ACOS",            a: p(a.summary.avgAcos), b: p(b.summary.avgAcos), delta: b.summary.avgAcos - a.summary.avgAcos,               fmt: (d:number)=>`${sign(d)}${((Math.abs(d))*100).toFixed(1)}%`, good: (d:number)=>d<0 },
+    { metric: "CVR",             a: p(a.summary.avgCvr),  b: p(b.summary.avgCvr),  delta: b.summary.avgCvr - a.summary.avgCvr,                 fmt: (d:number)=>`${sign(d)}${((Math.abs(d))*100).toFixed(1)}%`, good: (d:number)=>d>0 },
+    { metric: "CTR",             a: p(a.summary.avgCtr),  b: p(b.summary.avgCtr),  delta: b.summary.avgCtr - a.summary.avgCtr,                 fmt: (d:number)=>`${sign(d)}${((Math.abs(d))*100).toFixed(2)}%`, good: (d:number)=>d>0 },
+    { metric: "Total Waste",     a: f(a.totalWaste),      b: f(b.totalWaste),      delta: b.totalWaste - a.totalWaste,                           fmt: (d:number)=>`${sign(d)}${f(Math.abs(d))}`,       good: (d:number)=>d<0 },
+    { metric: "Ordered Revenue", a: f(a.summary.totalOrderedRevenue), b: f(b.summary.totalOrderedRevenue), delta: b.summary.totalOrderedRevenue - a.summary.totalOrderedRevenue, fmt: (d:number)=>`${sign(d)}${f(Math.abs(d))}`, good: (d:number)=>d>0 },
+    { metric: "Orders",          a: fmtN(a.summary.totalOrders), b: fmtN(b.summary.totalOrders), delta: b.summary.totalOrders - a.summary.totalOrders, fmt: (d:number)=>`${sign(d)}${Math.abs(d)}`,          good: (d:number)=>d>0 },
+    { metric: "Return Rate",     a: p(a.summary.returnRate), b: p(b.summary.returnRate), delta: b.summary.returnRate - a.summary.returnRate,     fmt: (d:number)=>`${sign(d)}${((Math.abs(d))*100).toFixed(1)}%`, good: (d:number)=>d<0 },
+    { metric: "Health Score",    a: `${a.score}/100`,    b: `${b.score}/100`,    delta: b.score - a.score,                                    fmt: (d:number)=>`${sign(d)}${d}`,                    good: (d:number)=>d>0 },
   ];
 
-  const dirColor = (r: PeriodDiff) => {
-    if (r.direction === "neutral") return "#57606a";
-    return (r.direction === "up") === r.goodWhenUp ? "#166534" : "#ef4444";
-  };
-  const arrow = (r: PeriodDiff) => r.direction === "up" ? "▲" : r.direction === "down" ? "▼" : "—";
+  // dedupe
+  const seen = new Set<string>();
+  const deduped = rows.filter(r => { if (seen.has(r.metric)) return false; seen.add(r.metric); return true; });
 
-  return `<div style="overflow-x:auto"><table ${TABLE_STYLE}>
-<thead><tr>
-  ${TH("Metric", "left")}
-  ${TH(a.periodLabel)}
-  ${TH(b.periodLabel)}
-  ${TH("Change")}
-</tr></thead>
-<tbody>
-${rows.map(r => `<tr>
-  ${TD(`<strong>${r.metric}</strong>`, "left")}
-  ${TD(r.periodA)}
-  ${TD(r.periodB)}
-  ${TD(`<span style="color:${dirColor(r)};font-weight:600">${arrow(r)} ${r.delta}</span>`)}
-</tr>`).join("")}
-</tbody>
-</table></div>`;
-}
+  const TH = (l: string, al = "right") => `<th style="padding:6px 10px;border-bottom:2px solid #e5e7eb;text-align:${al};color:#57606a;font-weight:600">${l}</th>`;
+  const TD = (v: string, al = "right", c = "") => `<td style="padding:5px 10px;border-bottom:1px solid #f0f0f0;text-align:${al};${c?`color:${c}`:""}">${v}</td>`;
 
-// ── Build structured context for LLM — includes actual findings ──
-export function buildLLMContext(audit: AuditResult, question: string): string {
-  const { summary, score, scoreLabel, spendEfficiency, structureQuality, totalWaste, totalOpportunity, topWaste, topOpportunities, findings, asinCohorts } = audit;
-
-  const cows    = asinCohorts.filter(a => a.cohort === "cash_cow").slice(0, 5);
-  const loved   = asinCohorts.filter(a => a.cohort === "need_love").slice(0, 5);
-  const paused  = asinCohorts.filter(a => a.cohort === "reduce_pause").slice(0, 5);
-
-  return `You are an Amazon advertising analyst. Answer the user's question based ONLY on the data below. Be direct, confident, and specific. Always include dollar amounts and clear next actions. Never guess or fabricate data not shown below.
-
-ACCOUNT SNAPSHOT (${summary.reportingDays}-day period):
-- Health Score: ${score}/100 (${scoreLabel})
-- Spend Efficiency: ${spendEfficiency}/70 | Structure Quality: ${structureQuality}/30
-- Total Ad Spend: ${fmt$(summary.totalSpend)} | Ad-Attributed Sales: ${fmt$(summary.totalSales)}
-- Ordered Revenue (Vendor Central): ${fmt$(summary.totalOrderedRevenue)} | Ordered Units: ${summary.totalOrderedUnits.toLocaleString()}
-- Avg ACOS: ${fmtPct(summary.avgAcos)} | Avg CVR: ${fmtPct(summary.avgCvr)} | Avg CTR: ${fmtPct(summary.avgCtr)}
-- Total Impressions: ${summary.totalImpressions.toLocaleString()} | Total Clicks: ${summary.totalClicks.toLocaleString()} | Total Orders: ${summary.totalOrders.toLocaleString()}
-- Campaigns: ${summary.campaignCount} | Keywords: ${summary.keywordCount} | ASINs tracked: ${summary.asinCount}
-- Page Views: ${summary.totalPageViews.toLocaleString()} | Return Rate: ${fmtPct(summary.returnRate)}
-- Top Brand: ${summary.topBrand}
-- Total Waste: ${fmt$(totalWaste)} | Monthly Opportunity Upside: ${fmt$(totalOpportunity)}
-- Files loaded: ${audit.hasCampaignData ? "Bulk Campaign ✓" : "No campaign file"} | ${audit.hasSalesData ? "Vendor Central Sales + Traffic ✓" : "No sales file"}
-
-TOP WASTE FINDINGS (${topWaste.length} shown):
-${topWaste.slice(0, 8).map((f, i) => `${i + 1}. [${f.severity.toUpperCase()}] ${f.title}\n   Detail: ${f.detail}\n   Impact: ${fmt$(f.impact)} | Action: ${f.action}`).join("\n")}
-
-TOP OPPORTUNITIES (${topOpportunities.length} shown):
-${topOpportunities.slice(0, 8).map((f, i) => `${i + 1}. ${f.title}\n   Detail: ${f.detail}\n   Upside: ${fmt$(f.impact * 4)}/month | Action: ${f.action}`).join("\n")}
-
-FINDINGS BREAKDOWN:
-- Critical: ${findings.filter(f => f.severity === "critical").length} | High: ${findings.filter(f => f.severity === "high").length} | Medium: ${findings.filter(f => f.severity === "medium").length} | Low: ${findings.filter(f => f.severity === "low").length}
-- Waste findings: ${findings.filter(f => f.category === "waste").length} | Opportunity: ${findings.filter(f => f.category === "opportunity").length} | Structure: ${findings.filter(f => f.category === "structure").length}
-
-TOP ASIN COHORTS:
-Cash Cows (${asinCohorts.filter(a => a.cohort === "cash_cow").length} total): ${cows.map(a => `${a.asin} (${fmt$(a.orderedRevenue)}, ${a.orderedUnits} units)`).join("; ")}
-Need Love (${asinCohorts.filter(a => a.cohort === "need_love").length} total): ${loved.map(a => `${a.asin} (${fmt$(a.orderedRevenue)}, rev/view $${a.revenuePerView.toFixed(2)})`).join("; ")}
-Reduce/Pause (${asinCohorts.filter(a => a.cohort === "reduce_pause").length} total): ${paused.map(a => `${a.asin} (${fmt$(a.orderedRevenue)})`).join("; ")}
-
-USER QUESTION: ${question}
-
-Instructions: Answer in 3–6 sentences. Be specific with numbers from the data above. End with 1–2 concrete next actions.`;
-}
-
-// ── Local (no-LLM) responses ──
-export function buildLocalResponse(audit: AuditResult, intentParam: string, question: string): string {
-  const intent = detectIntent(question); // always re-detect from full question for best accuracy
-  const { summary, score, scoreLabel, spendEfficiency, structureQuality, totalWaste, totalOpportunity, topWaste, topOpportunities, findings, asinCohorts } = audit;
-
-  switch (intent) {
-
-    case "waste": {
-      const lines = topWaste.slice(0, 5).map(f =>
-        fc(f.title, f.detail, f.action, severityColor(f.severity))
-      ).join("");
-      return `Your account is wasting <strong>${fmt$(totalWaste)}</strong> in this ${summary.reportingDays}-day period — that's <strong>${fmt$(totalWaste * 12)}/year</strong> if not addressed:<br>${lines}<br><strong>Total recoverable: ${fmt$(totalWaste)}</strong>`;
-    }
-
-    case "score": {
-      const draggers = findings.filter(f => f.severity === "critical" || f.severity === "high").slice(0, 3);
-      const lines    = draggers.map(f => fc(f.title, f.detail, f.action)).join("");
-      const potential = Math.min(27, findings.filter(f => f.severity === "critical").length * 5 + findings.filter(f => f.severity === "high").length * 2);
-      return `Your health score is <strong>${score}/100 — ${scoreLabel}</strong>.<br>
-        <div class="chip-row">
-          <div class="chip-stat ${spendEfficiency < 50 ? 'red' : 'yellow'}"><span>${spendEfficiency}</span>Spend Eff /70</div>
-          <div class="chip-stat ${structureQuality < 20 ? 'red' : 'yellow'}"><span>${structureQuality}</span>Structure /30</div>
-          <div class="chip-stat red"><span>${findings.filter(f => f.severity === "critical").length}</span>Critical</div>
-        </div>
-        <strong>What's dragging it:</strong><br>${lines || "<div class='fc'><div class='fc-detail'>No critical issues found — score is limited by structure quality.</div></div>"}
-        <strong>Fix critical issues → estimated score: ${Math.min(100, score + potential)}/100</strong>`;
-    }
-
-    case "keywords": {
-      const kwWaste  = findings.filter(f => f.category === "waste" && f.id.startsWith("kw-"));
-      const highAcos = findings.filter(f => f.id.startsWith("kw-acos-"));
-      const lowCtr   = findings.filter(f => f.id.startsWith("kw-ctr-"));
-      const zeroSales = kwWaste.filter(f => f.id.includes("waste"));
-      const lines = kwWaste.slice(0, 5).map(f =>
-        fc(f.title, f.detail, f.action)
-      ).join("");
-      return `Found <strong>${kwWaste.length} keywords</strong> with issues across ${summary.keywordCount} total:<br>
-        <div class="chip-row">
-          <div class="chip-stat red"><span>${highAcos.length}</span>High ACOS</div>
-          <div class="chip-stat yellow"><span>${lowCtr.length}</span>Low CTR</div>
-          <div class="chip-stat red"><span>${zeroSales.length}</span>Zero Sales</div>
-        </div>
-        ${lines || "<div class='fc'><div class='fc-detail'>No critical keyword issues found.</div></div>"}`;
-    }
-
-    case "topkeywords": {
-      const kwOpp = findings.filter(f => f.category === "opportunity" && f.id.startsWith("kw-")).slice(0, 4);
-      const lines = kwOpp.map(f => fc(f.title, f.detail, f.action, "#166534", "opp")).join("");
-      return `Top performing keyword opportunities from ${summary.keywordCount} keywords:<br>${lines || "<div class='fc'><div class='fc-detail'>Upload a search term report to identify top-converting terms.</div></div>"}`;
-    }
-
-    case "campaigns": {
-      const campF  = findings.filter(f => f.id.startsWith("camp-"));
-      const lines  = campF.slice(0, 4).map(f =>
-        fc(f.title, f.detail, f.action, f.category === "opportunity" ? "#166534" : "#ef4444", f.category === "opportunity" ? "opp" : "")
-      ).join("");
-      return `<strong>${summary.campaignCount} campaigns</strong> analyzed — ${campF.filter(f => f.severity === "critical").length} critical issues, ${campF.filter(f => f.category === "opportunity").length} opportunities:<br>
-        ${lines || "<div class='fc'><div class='fc-detail'>No critical campaign issues detected.</div></div>"}`;
-    }
-
-    case "topcampaigns": {
-      const campOpp = findings.filter(f => f.category === "opportunity" && f.id.startsWith("camp-")).slice(0, 4);
-      const lines   = campOpp.map(f => fc(f.title, f.detail, f.action, "#166534", "opp")).join("");
-      return `Top campaign opportunities across ${summary.campaignCount} campaigns:<br>${lines || "<div class='fc'><div class='fc-detail'>No campaign opportunities detected — check for underfunded campaigns.</div></div>"}`;
-    }
-
-    case "opportunities": {
-      const lines = topOpportunities.slice(0, 5).map(f =>
-        fc(f.title, f.detail, f.action, "#166534", "opp")
-      ).join("");
-      return `Found <strong>${findings.filter(f => f.category === "opportunity").length} growth opportunities</strong> — total upside <strong>${fmt$(totalOpportunity)}/month</strong>:<br>${lines || "<div class='fc opp'><div class='fc-detail'>Upload the bulk campaign file to unlock more opportunities.</div></div>"}`;
-    }
-
-    case "asins": {
-      const cows   = asinCohorts.filter(a => a.cohort === "cash_cow");
-      const love   = asinCohorts.filter(a => a.cohort === "need_love");
-      const reduce = asinCohorts.filter(a => a.cohort === "reduce_pause");
-      const topCow = cows[0];
-      const topLove = love[0];
-      return `ASIN cohort analysis across <strong>${asinCohorts.length} ASINs</strong>:
-        <div class="chip-row">
-          <div class="chip-stat green"><span>${cows.length}</span>Cash Cows</div>
-          <div class="chip-stat yellow"><span>${love.length}</span>Need Love</div>
-          <div class="chip-stat red"><span>${reduce.length}</span>Reduce/Pause</div>
-        </div>
-        ${topCow ? fc(`Cash Cow: ${topCow.asin}`, `${topCow.title.slice(0, 60)} · Revenue: ${fmt$(topCow.orderedRevenue)} · ${topCow.orderedUnits.toLocaleString()} units`, "Increase ad budget — this ASIN converts well", "#166534", "opp") : ""}
-        ${topLove ? fc(`Needs Love: ${topLove.asin}`, `${topLove.title.slice(0, 60)} · Rev/View: $${topLove.revenuePerView.toFixed(2)} — high demand, underfunded`, "Create a dedicated Sponsored Products campaign", "#92400e", "warn") : ""}`;
-    }
-
-    case "searchterms": {
-      const stWaste = findings.filter(f => f.id.startsWith("st-waste-"));
-      const stOpp   = findings.filter(f => f.id.startsWith("st-opp-") || f.id.startsWith("st-expand-"));
-      const lines   = [...stWaste.slice(0, 2), ...stOpp.slice(0, 2)].map(f =>
-        fc(f.title, f.detail, f.action, f.category === "opportunity" ? "#166534" : "#ef4444", f.category === "opportunity" ? "opp" : "")
-      ).join("");
-      return `Search term analysis: <strong>${stWaste.length} wasted terms</strong> · <strong>${stOpp.length} expansion opportunities</strong>:<br>${lines || "<div class='fc'><div class='fc-detail'>Upload a Search Term Report for deeper query-level analysis.</div></div>"}`;
-    }
-
-    case "datainfo": {
-      const rows = [
-        audit.hasCampaignData
-          ? fc("Bulk Campaign File", `${summary.campaignCount} campaigns · ${summary.keywordCount} keywords · ${summary.totalImpressions.toLocaleString()} impressions · ${summary.totalClicks.toLocaleString()} clicks`, "Data is loaded and analyzed", "#166534", "opp")
-          : "",
-        audit.hasSalesData
-          ? fc("Vendor Central Sales + Traffic", `${summary.asinCount} ASINs · ${summary.totalOrderedUnits.toLocaleString()} ordered units · ${summary.totalPageViews.toLocaleString()} page views · Return rate ${fmtPct(summary.returnRate)}`, "Data is loaded and analyzed", "#166534", "opp")
-          : "",
-      ].filter(Boolean).join("");
-      return `Your data covers approximately <strong>${summary.reportingDays} days</strong>:<br>
-        ${rows}
-        <div class="chip-row">
-          <div class="chip-stat blue"><span>${summary.campaignCount}</span>Campaigns</div>
-          <div class="chip-stat blue"><span>${summary.keywordCount}</span>Keywords</div>
-          ${audit.hasSalesData ? `<div class="chip-stat green"><span>${summary.asinCount}</span>ASINs</div>` : ""}
-        </div>
-        Ad spend: <strong>${fmt$(summary.totalSpend)}</strong> · Ad sales: <strong>${fmt$(summary.totalSales)}</strong>`;
-    }
-
-    case "spend": {
-      const wasteRatio = (summary.wasteRatio * 100).toFixed(1);
-      return `Ad spend breakdown over ${summary.reportingDays} days:
-        <div class="chip-row">
-          <div class="chip-stat blue"><span>${fmt$(summary.totalSpend)}</span>Total Spend</div>
-          <div class="chip-stat red"><span>${fmt$(totalWaste)}</span>Wasted</div>
-          <div class="chip-stat green"><span>${fmt$(summary.totalSales)}</span>Sales</div>
-        </div>
-        ${wasteRatio}% of spend is wasted — <strong>${fmt$(totalWaste)}</strong> going to zero-converting keywords and poor campaigns.<br>
-        ${topWaste[0] ? fc(`Biggest waste: ${topWaste[0].title}`, topWaste[0].detail, topWaste[0].action) : ""}
-        Average ACOS: <strong>${fmtPct(summary.avgAcos)}</strong> · Avg CPC: <strong>${summary.totalClicks > 0 ? fmt$(summary.totalSpend / summary.totalClicks) : "N/A"}</strong>`;
-    }
-
-    case "revenue": {
-      return `Revenue overview for ${summary.reportingDays}-day period:
-        <div class="chip-row">
-          <div class="chip-stat green"><span>${fmt$(summary.totalOrderedRevenue)}</span>Ordered Revenue</div>
-          <div class="chip-stat blue"><span>${fmt$(summary.totalSales)}</span>Ad Sales</div>
-          <div class="chip-stat blue"><span>${summary.totalOrderedUnits.toLocaleString()}</span>Units Ordered</div>
-        </div>
-        Ad-attributed sales represent <strong>${summary.totalOrderedRevenue > 0 ? ((summary.totalSales / summary.totalOrderedRevenue) * 100).toFixed(1) : "N/A"}%</strong> of total ordered revenue.<br>
-        ACOS: <strong>${fmtPct(summary.avgAcos)}</strong> · CVR: <strong>${fmtPct(summary.avgCvr)}</strong> · Return Rate: <strong>${fmtPct(summary.returnRate)}</strong><br>
-        ${topOpportunities[0] ? fc(`Top revenue opportunity: ${topOpportunities[0].title}`, topOpportunities[0].detail, topOpportunities[0].action, "#166534", "opp") : ""}`;
-    }
-
-    case "returns": {
-      const returnFindings = findings.filter(f => f.id.includes("return")).slice(0, 3);
-      const lines = returnFindings.map(f => fc(f.title, f.detail, f.action, "#f97316")).join("");
-      return `Return rate analysis:
-        <div class="chip-row">
-          <div class="chip-stat ${summary.returnRate > 0.1 ? 'red' : summary.returnRate > 0.05 ? 'yellow' : 'green'}"><span>${fmtPct(summary.returnRate)}</span>Return Rate</div>
-          <div class="chip-stat blue"><span>${summary.totalOrderedUnits.toLocaleString()}</span>Units Ordered</div>
-        </div>
-        ${summary.returnRate > 0.1 ? "⚠️ Return rate above 10% — review product listings, images, and descriptions." : summary.returnRate > 0.05 ? "Return rate is moderate — monitor for spikes by ASIN." : "Return rate looks healthy — below 5%."}
-        ${lines || ""}`;
-    }
-
-    case "ctr": {
-      const lowCtrF = findings.filter(f => f.id.startsWith("kw-ctr-")).slice(0, 4);
-      const lines   = lowCtrF.map(f => fc(f.title, f.detail, f.action, "#f97316")).join("");
-      return `Click-Through Rate (CTR) overview:
-        <div class="chip-row">
-          <div class="chip-stat ${summary.avgCtr < 0.002 ? 'red' : 'yellow'}"><span>${fmtPct(summary.avgCtr)}</span>Avg CTR</div>
-          <div class="chip-stat blue"><span>${summary.totalImpressions.toLocaleString()}</span>Impressions</div>
-          <div class="chip-stat blue"><span>${summary.totalClicks.toLocaleString()}</span>Clicks</div>
-        </div>
-        Amazon benchmark is ~0.35%. Your avg CTR of <strong>${fmtPct(summary.avgCtr)}</strong> is ${summary.avgCtr < 0.002 ? "below benchmark — ads may need better copy or images" : summary.avgCtr < 0.004 ? "near benchmark" : "above benchmark — strong ad relevance"}.<br>
-        ${lines.length ? `Low CTR keywords to fix:<br>${lines}` : ""}`;
-    }
-
-    case "cvr": {
-      return `Conversion Rate (CVR) overview:
-        <div class="chip-row">
-          <div class="chip-stat ${summary.avgCvr < 0.05 ? 'red' : 'yellow'}"><span>${fmtPct(summary.avgCvr)}</span>Avg CVR</div>
-          <div class="chip-stat blue"><span>${summary.totalClicks.toLocaleString()}</span>Clicks</div>
-          <div class="chip-stat blue"><span>${summary.totalOrders.toLocaleString()}</span>Orders</div>
-        </div>
-        Amazon average CVR is ~10–13%. Your CVR of <strong>${fmtPct(summary.avgCvr)}</strong> is ${summary.avgCvr < 0.05 ? "low — check product page content, pricing, and reviews" : summary.avgCvr < 0.10 ? "moderate — room to improve with better listings" : "strong — focus on scaling winning campaigns"}.<br>
-        ACOS: <strong>${fmtPct(summary.avgAcos)}</strong> (a higher CVR will lower ACOS). ${topWaste[0] ? `Top action: ${topWaste[0].action}.` : ""}`;
-    }
-
-    case "impressions": {
-      const impFindings = findings.filter(f => f.id.includes("impression") || f.id.includes("visibility")).slice(0, 3);
-      const lines = impFindings.map(f => fc(f.title, f.detail, f.action, "#166534", "opp")).join("");
-      return `Impressions & visibility:
-        <div class="chip-row">
-          <div class="chip-stat blue"><span>${(summary.totalImpressions / 1000).toFixed(0)}K</span>Impressions</div>
-          <div class="chip-stat blue"><span>${(summary.totalPageViews / 1000).toFixed(0)}K</span>Page Views</div>
-          <div class="chip-stat yellow"><span>${fmtPct(summary.avgCtr)}</span>CTR</div>
-        </div>
-        ${summary.totalImpressions.toLocaleString()} ad impressions across ${summary.keywordCount} keywords and ${summary.campaignCount} campaigns.<br>
-        ${lines || (topOpportunities[0] ? fc(`Grow impressions: ${topOpportunities[0].title}`, topOpportunities[0].detail, topOpportunities[0].action, "#166534", "opp") : "")}`;
-    }
-
-    case "brands": {
-      const brandCohorts = asinCohorts.slice(0, 6);
-      const brandRevMap: Record<string, number> = {};
-      asinCohorts.forEach(a => {
-        brandRevMap[a.brand] = (brandRevMap[a.brand] ?? 0) + a.orderedRevenue;
-      });
-      const sortedBrands = Object.entries(brandRevMap).sort((a, b) => b[1] - a[1]).slice(0, 5);
-      const lines = sortedBrands.map(([brand, rev]) =>
-        `<div class="fc opp"><div class="fc-title">${brand}</div><div class="fc-detail">Ordered Revenue: ${fmt$(rev)}</div></div>`
-      ).join("");
-      return `Brand performance — top brand: <strong>${summary.topBrand}</strong>:<br>${lines || "<div class='fc'><div class='fc-detail'>Upload Vendor Central sales data to see brand breakdown.</div></div>"}`;
-    }
-
-    case "summary": {
-      return `Account snapshot — ${summary.reportingDays}-day period:
-        <div class="chip-row">
-          <div class="chip-stat ${score < 65 ? 'red' : score < 80 ? 'yellow' : 'green'}"><span>${score}</span>Health Score</div>
-          ${totalWaste > 0 ? `<div class="chip-stat red"><span>${fmt$(totalWaste)}</span>Total Waste</div>` : ""}
-          ${summary.totalOrderedRevenue > 0 ? `<div class="chip-stat green"><span>${fmt$(summary.totalOrderedRevenue)}</span>Revenue</div>` : ""}
-          <div class="chip-stat ${findings.filter(f => f.severity === "critical").length > 0 ? 'red' : 'green'}"><span>${findings.filter(f => f.severity === "critical").length}</span>Critical</div>
-        </div>
-        <strong>${summary.campaignCount} campaigns</strong> · ${summary.keywordCount} keywords · ${summary.asinCount} ASINs · ${summary.totalImpressions.toLocaleString()} impressions<br>
-        ${summary.totalSpend > 0 ? `ACOS: <strong>${fmtPct(summary.avgAcos)}</strong> · CVR: <strong>${fmtPct(summary.avgCvr)}</strong> · CTR: <strong>${fmtPct(summary.avgCtr)}</strong><br>` : ""}
-        ${summary.totalOrderedRevenue > 0 ? `Revenue: <strong>${fmt$(summary.totalOrderedRevenue)}</strong> · Units: <strong>${summary.totalOrderedUnits.toLocaleString()}</strong> · Returns: <strong>${fmtPct(summary.returnRate)}</strong><br>` : ""}
-        <strong>Top priority:</strong> ${topWaste[0] ? `${topWaste[0].title} — ${topWaste[0].action}` : "No critical issues found."}`;
-    }
-
-    case "table_campaigns": {
-      if (!audit.campaignTable.length) {
-        return `<div class="fc"><div class="fc-detail">No campaign data loaded. Upload a bulk campaign file to see the campaign breakdown table.</div></div>`;
-      }
-      return `Campaign breakdown — <strong>${audit.campaignTable.length} campaigns</strong> sorted by spend:<br>${campaignTableHtml(audit.campaignTable)}`;
-    }
-
-    case "table_asins": {
-      if (!audit.asinTable.length) {
-        return `<div class="fc opp"><div class="fc-detail">No Vendor Central data loaded. Upload Sales and Traffic files to see the ASIN breakdown table.</div></div>`;
-      }
-      return `ASIN breakdown — <strong>${audit.asinTable.length} ASINs</strong> sorted by revenue:<br>${asinTableHtml(audit.asinTable)}`;
-    }
-
-    case "compare": {
-      // Single-period: explain what comparison requires
-      return `<div class="fc">
-        <div class="fc-title" style="color:#3b82d4">Period Comparison — upload 2 files to compare</div>
-        <div class="fc-detail">
-          To compare week-over-week or period-over-period:<br>
-          1. Upload your <strong>current period</strong> bulk file → run the audit<br>
-          2. Use the <strong>"Compare Period"</strong> button (coming in next upload) to upload a <strong>second file</strong><br>
-          3. The app will show a side-by-side table of all key metrics with ▲▼ change indicators
-        </div>
-        <div class="fc-action">▶ For now, here's the current period breakdown:</div>
-      </div>
-      ${audit.campaignTable.length ? campaignTableHtml(audit.campaignTable, 10) : ""}`;
-    }
-
-    case "powerpoint":
-      return `__POWERPOINT__`;
-
-    default: {
-      // Unknown intent — return a useful summary rather than a dead-end
-      return `Here's a quick look at your account:<br>
-        <div class="chip-row">
-          <div class="chip-stat ${score < 65 ? 'red' : score < 80 ? 'yellow' : 'green'}"><span>${score}</span>Health Score</div>
-          <div class="chip-stat red"><span>${fmt$(totalWaste)}</span>Waste</div>
-          <div class="chip-stat green"><span>${fmt$(totalOpportunity)}</span>Opp/mo</div>
-        </div>
-        ${topWaste[0] ? `Top issue: <strong>${topWaste[0].title}</strong> — ${topWaste[0].action}<br>` : ""}
-        Ask me: <em>"Show waste"</em> · <em>"Keyword issues"</em> · <em>"Growth opportunities"</em> · <em>"ASIN analysis"</em> · <em>"Why this score?"</em> · <em>"How many days of data?"</em>`;
-    }
-  }
-}
-
-export function getIntent(question: string): Intent {
-  return detectIntent(question);
+  return `<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:13px;margin-top:8px">
+<thead><tr>${TH("Metric","left")}${TH(a.periodLabel)}${TH(b.periodLabel)}${TH("Change")}</tr></thead>
+<tbody>${deduped.map(r => {
+    const color = r.delta === 0 ? "#57606a" : r.good(r.delta) ? "#166534" : "#ef4444";
+    const arrow = r.delta > 0 ? "▲" : r.delta < 0 ? "▼" : "—";
+    return `<tr>${TD(`<strong>${r.metric}</strong>`,"left")}${TD(r.a)}${TD(r.b)}${TD(`<span style="color:${color};font-weight:700">${arrow} ${r.fmt(r.delta)}</span>`)}</tr>`;
+  }).join("")}</tbody></table></div>`;
 }

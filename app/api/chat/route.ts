@@ -21,28 +21,50 @@ export async function POST(req: NextRequest) {
 
     const context = buildLLMContext(audit, question);
 
-    const response = await fetch("https://api.openai.com/v1/chat/completions", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${key}`,
-      },
-      body: JSON.stringify({
-        model: "gpt-3.5-turbo",
-        messages: [{ role: "user", content: context }],
-        max_tokens: 400,
-        temperature: 0.3,
-      }),
-    });
+    // Try GPT-4o first (best reasoning), fall back to gpt-3.5-turbo
+    const models = ["gpt-4o", "gpt-4-turbo", "gpt-3.5-turbo-16k", "gpt-3.5-turbo"];
 
-    if (!response.ok) {
-      const err = await response.json();
-      return NextResponse.json({ error: err.error?.message ?? "OpenAI error" }, { status: 200 });
+    for (const model of models) {
+      const response = await fetch("https://api.openai.com/v1/chat/completions", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${key}`,
+        },
+        body: JSON.stringify({
+          model,
+          messages: [
+            {
+              role: "system",
+              content: "You are a world-class Amazon advertising analyst. You have deep expertise in PPC, ACOS optimization, campaign structure, and retail analytics. Always answer based strictly on the data provided. Be specific, use exact numbers, and provide actionable recommendations.",
+            },
+            {
+              role: "user",
+              content: context,
+            },
+          ],
+          max_tokens: 1500,
+          temperature: 0.2, // Low temperature = factual, consistent answers
+        }),
+      });
+
+      if (response.status === 404 || response.status === 400) {
+        // Model not available, try next
+        continue;
+      }
+
+      if (!response.ok) {
+        const err = await response.json();
+        return NextResponse.json({ error: err.error?.message ?? "OpenAI error" }, { status: 200 });
+      }
+
+      const data = await response.json();
+      const answer = data.choices?.[0]?.message?.content ?? "";
+      return NextResponse.json({ answer, model });
     }
 
-    const data = await response.json();
-    const answer = data.choices?.[0]?.message?.content ?? "";
-    return NextResponse.json({ answer });
+    return NextResponse.json({ error: "No available model responded" }, { status: 200 });
+
   } catch (e) {
     return NextResponse.json({ error: "Server error" }, { status: 500 });
   }
