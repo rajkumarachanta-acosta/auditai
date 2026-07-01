@@ -47,7 +47,7 @@ export async function generatePptx(audit: AuditResult, brandName = "Your Account
   pptx.author = "AuditAI";
   pptx.title = `${brandName} — Campaign Audit Report`;
 
-  const { summary, score, scoreLabel, spendEfficiency, structureQuality, totalWeeklyWaste, totalMonthlyOpportunity, findings, topWaste, topOpportunities, asinCohorts } = audit;
+  const { summary, score, scoreLabel, spendEfficiency, structureQuality, totalWaste: totalWeeklyWaste, totalOpportunity: totalMonthlyOpportunity, findings, topWaste, topOpportunities, asinCohorts } = audit;
 
   // ── SLIDE 1: Title ──
   const s1 = pptx.addSlide();
@@ -204,7 +204,7 @@ export async function generatePptx(audit: AuditResult, brandName = "Your Account
   });
 
   if (cows[0]) {
-    s7.addText(`Top Cash Cow: ${cows[0].asin}  |  CVR: ${fmtPct(cows[0].cvr)}  |  Sales: ${fmt$(cows[0].sales)}  →  Prioritize ad budget here`, {
+    s7.addText(`Top Cash Cow: ${cows[0].asin}  |  Revenue: ${fmt$(cows[0].orderedRevenue)}  |  Units: ${cows[0].orderedUnits}  →  Prioritize ad budget here`, {
       x: 0.4, y: 3.8, w: 9.2, h: 0.4, fontSize: 11, color: "166534", fontFace: "Segoe UI",
     });
   }

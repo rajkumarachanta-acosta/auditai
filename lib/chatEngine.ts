@@ -52,17 +52,18 @@ function severityColor(s: Finding["severity"]): string {
 
 // ── Build structured context for LLM (small, no raw data) ──
 export function buildLLMContext(audit: AuditResult, question: string): string {
-  const { summary, score, scoreLabel, spendEfficiency, structureQuality, totalWeeklyWaste, totalMonthlyOpportunity, topWaste, topOpportunities, findings } = audit;
+  const { summary, score, scoreLabel, spendEfficiency, structureQuality, totalWaste, totalOpportunity, topWaste, topOpportunities, findings } = audit;
 
   return `You are an Amazon advertising analyst. Answer the user's question based ONLY on the data below. Be direct, confident, and specific. Always include dollar amounts and next actions. Never guess or add data not shown below.
 
 ACCOUNT SNAPSHOT:
 - Health Score: ${score}/100 (${scoreLabel})
 - Spend Efficiency: ${spendEfficiency}/70 | Structure Quality: ${structureQuality}/30
-- Total Weekly Spend: ${fmt$(summary.totalSpend)} | Weekly Sales: ${fmt$(summary.totalSales)}
+- Total Spend: ${fmt$(summary.totalSpend)} | Total Sales: ${fmt$(summary.totalSales)}
+- Ordered Revenue: ${fmt$(summary.totalOrderedRevenue)} | Ordered Units: ${summary.totalOrderedUnits}
 - Avg ACOS: ${fmtPct(summary.avgAcos)} | Avg CVR: ${fmtPct(summary.avgCvr)} | Avg CTR: ${fmtPct(summary.avgCtr)}
 - Campaigns: ${summary.campaignCount} | Keywords: ${summary.keywordCount} | ASINs: ${summary.asinCount}
-- Weekly Waste: ${fmt$(totalWeeklyWaste)} | Monthly Opportunity: ${fmt$(totalMonthlyOpportunity)}
+- Total Waste: ${fmt$(totalWaste)} | Monthly Opportunity: ${fmt$(totalOpportunity)}
 
 TOP WASTE FINDINGS:
 ${topWaste.map((f, i) => `${i + 1}. [${f.severity.toUpperCase()}] ${f.title} | Impact: ${fmt$(f.impact)}/week | Action: ${f.action}`).join("\n")}
@@ -85,14 +86,14 @@ Respond in 3–6 sentences max. Be specific with numbers. End with 1–2 clear n
 
 // ── Local (no-LLM) responses built from audit data ──
 export function buildLocalResponse(audit: AuditResult, intent: Intent, question: string): string {
-  const { summary, score, scoreLabel, spendEfficiency, structureQuality, totalWeeklyWaste, totalMonthlyOpportunity, topWaste, topOpportunities, findings, asinCohorts } = audit;
+  const { summary, score, scoreLabel, spendEfficiency, structureQuality, totalWaste, totalOpportunity, topWaste, topOpportunities, findings, asinCohorts } = audit;
 
   switch (intent) {
     case "waste": {
       const lines = topWaste.map((f) =>
         `<div class="fc"><div class="fc-title" style="color:${severityColor(f.severity)}">${f.title}</div><div class="fc-detail">${f.detail}</div><div class="fc-action">▶ ${f.action}</div></div>`
       ).join("");
-      return `Your top waste sources are costing <strong>${fmt$(totalWeeklyWaste)}/week</strong> (${fmt$(totalWeeklyWaste * 52)}/year recoverable):<br>${lines}<br><strong>Total recoverable with fixes: ${fmt$(totalWeeklyWaste)}/week</strong>`;
+      return `Your top waste sources total <strong>${fmt$(totalWaste)}</strong> in the reporting period (${fmt$(totalWaste * 12)}/year if not fixed):<br>${lines}<br><strong>Total recoverable: ${fmt$(totalWaste)}</strong>`;
     }
 
     case "keywords": {
@@ -117,7 +118,7 @@ export function buildLocalResponse(audit: AuditResult, intent: Intent, question:
       const lines = topOpportunities.map((f) =>
         `<div class="fc opp"><div class="fc-title">${f.title}</div><div class="fc-detail">${f.detail}</div><div class="fc-action">▶ ${f.action}</div></div>`
       ).join("");
-      return `Found <strong>${findings.filter(f => f.category === 'opportunity').length} growth opportunities</strong> with total upside of <strong>${fmt$(totalMonthlyOpportunity)}/month</strong>:<br>${lines || "<div class='fc opp'><div class='fc-detail'>Upload search term report to unlock more opportunities.</div></div>"}`;
+      return `Found <strong>${findings.filter(f => f.category === 'opportunity').length} growth opportunities</strong> with total upside of <strong>${fmt$(totalOpportunity)}/month</strong>:<br>${lines || "<div class='fc opp'><div class='fc-detail'>Upload the bulk campaign file to unlock more opportunities.</div></div>"}`;
     }
 
     case "asins": {
@@ -128,8 +129,8 @@ export function buildLocalResponse(audit: AuditResult, intent: Intent, question:
       const topLove = love[0];
       return `ASIN cohort analysis across <strong>${asinCohorts.length} ASINs</strong>:
         <div class="chip-row"><div class="chip-stat green"><span>${cows.length}</span>Cash Cows</div><div class="chip-stat yellow"><span>${love.length}</span>Need Love</div><div class="chip-stat red"><span>${reduce.length}</span>Reduce/Pause</div></div>
-        ${topCow ? `<div class="fc opp"><div class="fc-title">Cash Cow: ${topCow.asin}</div><div class="fc-detail">CVR: ${fmtPct(topCow.cvr)} · Sales: ${fmt$(topCow.sales)} — top performer</div><div class="fc-action">▶ Increase budget allocation for this ASIN</div></div>` : ""}
-        ${topLove ? `<div class="fc warn"><div class="fc-title">Needs Love: ${topLove.asin}</div><div class="fc-detail">CVR: ${fmtPct(topLove.cvr)} — high conversion but underfunded</div><div class="fc-action" style="color:#92400e">▶ Create dedicated sponsored product campaign</div></div>` : ""}`;
+        ${topCow ? `<div class="fc opp"><div class="fc-title">Cash Cow: ${topCow.asin}</div><div class="fc-detail">${topCow.title.slice(0,60)} · Revenue: ${fmt$(topCow.orderedRevenue)} · ${topCow.orderedUnits} units</div><div class="fc-action">▶ Increase ad budget allocation for this ASIN</div></div>` : ""}
+        ${topLove ? `<div class="fc warn"><div class="fc-title">Needs Love: ${topLove.asin}</div><div class="fc-detail">${topLove.title.slice(0,60)} · Rev/View: $${topLove.revenuePerView.toFixed(2)} — underfunded</div><div class="fc-action" style="color:#92400e">▶ Create dedicated Sponsored Products campaign</div></div>` : ""}`;
     }
 
     case "score": {
@@ -157,11 +158,12 @@ export function buildLocalResponse(audit: AuditResult, intent: Intent, question:
       return `Account snapshot: <strong>${summary.campaignCount} campaigns</strong>, ${summary.keywordCount} keywords, ${summary.asinCount} ASINs.<br>
         <div class="chip-row">
           <div class="chip-stat ${score < 65 ? 'red' : 'green'}"><span>${score}</span>Health Score</div>
-          <div class="chip-stat red"><span>${fmt$(totalWeeklyWaste)}</span>Weekly Waste</div>
-          <div class="chip-stat green"><span>${fmt$(totalMonthlyOpportunity)}</span>Opp/Month</div>
+          ${totalWaste > 0 ? `<div class="chip-stat red"><span>${fmt$(totalWaste)}</span>Total Waste</div>` : ""}
+          ${summary.totalOrderedRevenue > 0 ? `<div class="chip-stat blue"><span>${fmt$(summary.totalOrderedRevenue)}</span>Revenue</div>` : ""}
           <div class="chip-stat ${findings.filter(f=>f.severity==='critical').length > 0 ? 'red' : 'green'}"><span>${findings.filter(f=>f.severity==='critical').length}</span>Critical Issues</div>
         </div>
-        ACOS: ${fmtPct(summary.avgAcos)} | CVR: ${fmtPct(summary.avgCvr)} | CTR: ${fmtPct(summary.avgCtr)}<br>
+        ${summary.totalSpend > 0 ? `ACOS: ${fmtPct(summary.avgAcos)} | CVR: ${fmtPct(summary.avgCvr)} | CTR: ${fmtPct(summary.avgCtr)}<br>` : ""}
+        ${summary.totalOrderedRevenue > 0 ? `Ordered Revenue: ${fmt$(summary.totalOrderedRevenue)} · Units: ${summary.totalOrderedUnits.toLocaleString()} · Return Rate: ${(summary.returnRate*100).toFixed(1)}%<br>` : ""}
         <strong>Top priority:</strong> ${topWaste[0] ? `${topWaste[0].title} — ${topWaste[0].action}` : "No critical issues found."}`;
     }
 

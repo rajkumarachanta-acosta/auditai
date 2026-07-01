@@ -3,96 +3,184 @@ import { useState, useRef, useEffect, useCallback } from "react";
 import * as XLSX from "xlsx";
 import { runAuditEngine, AuditResult, RawData } from "@/lib/auditEngine";
 import { buildLocalResponse, getIntent, ChatMessage } from "@/lib/chatEngine";
+import { brand } from "@/lib/brand";
 
 // ── Helpers ──
 function fmt$(n: number): string {
-  if (n >= 1000000) return `$${(n / 1000000).toFixed(1)}M`;
-  if (n >= 1000) return `$${(n / 1000).toFixed(1)}K`;
+  if (n >= 1_000_000) return `$${(n / 1_000_000).toFixed(1)}M`;
+  if (n >= 1_000)     return `$${(n / 1_000).toFixed(1)}K`;
   return `$${n.toFixed(0)}`;
 }
 function uid() { return Math.random().toString(36).slice(2); }
 
 const SUGGESTIONS = [
-  { label: "💸 Biggest budget waste?", q: "What is our biggest budget waste right now?" },
+  { label: "📊 Account overview", q: "Give me an overall account summary" },
+  { label: "💸 Biggest waste?", q: "What is our biggest budget waste right now?" },
   { label: "⏸ Keywords to pause?", q: "Which keywords should I pause immediately?" },
   { label: "🚀 Growth opportunities", q: "Show me top growth opportunities" },
-  { label: "📊 Why this health score?", q: "Why is our health score low?" },
-  { label: "📦 ASINs needing help?", q: "Which ASINs need more ad support?" },
+  { label: "📦 ASIN performance", q: "Show me the ASIN cohort analysis" },
   { label: "📣 Campaign issues?", q: "Show me campaign health overview" },
-  { label: "🔍 Search term waste?", q: "Which search terms are wasting budget?" },
+  { label: "📊 Why this score?", q: "Why is our health score low?" },
   { label: "📑 Create PowerPoint", q: "Create a PowerPoint presentation of the full audit" },
 ];
 
-// ── File upload helper ──
-function parseExcel(buffer: ArrayBuffer): Record<string, unknown>[] {
-  const wb = XLSX.read(buffer, { type: "array" });
-  const ws = wb.Sheets[wb.SheetNames[0]];
-  return XLSX.utils.sheet_to_json(ws, { defval: "" });
+// ── Excel parser — skips metadata rows, finds real header row ──
+function parseSheet(ws: XLSX.WorkSheet): Record<string, unknown>[] {
+  // Find the real header row (first row where first cell looks like a column name not a metadata key)
+  const ref = ws["!ref"];
+  if (!ref) return [];
+  const range = XLSX.utils.decode_range(ref);
+
+  let headerRow = 0;
+  for (let r = range.s.r; r <= Math.min(range.s.r + 10, range.e.r); r++) {
+    const cell = ws[XLSX.utils.encode_cell({ r, c: 0 })];
+    if (!cell) continue;
+    const val = String(cell.v ?? "").trim();
+    // Real header rows start with known column names (ASIN, Entity, Customer Search Term, Campaign Name, etc.)
+    // Metadata rows look like "Program=[Retail]" or "Distributor View=[Manufacturing]"
+    if (
+      val === "ASIN" ||
+      val === "Entity" ||
+      val === "Customer Search Term" ||
+      val === "Campaign Name" ||
+      val === "Search Term" ||
+      val === "Portfolio Name"
+    ) {
+      headerRow = r;
+      break;
+    }
+  }
+
+  // Use sheet_to_json with the detected header row offset
+  const rows = XLSX.utils.sheet_to_json<Record<string, unknown>>(ws, {
+    range: headerRow,
+    defval: "",
+    raw: false,   // parse numbers as strings first, we handle coercion in engine
+  });
+
+  return rows;
 }
 
-function guessFileType(name: string, rows: Record<string, unknown>[]): keyof RawData | null {
+// ── Determine file type by name + column headers ──
+type FileType = keyof RawData | "bulk";
+
+function detectFileType(name: string, headers: string[]): FileType | null {
   const lower = name.toLowerCase();
-  const keys = rows[0] ? Object.keys(rows[0]).map(k => k.toLowerCase()) : [];
-  if (lower.includes("sales") || keys.some(k => k.includes("orderedproduct") || k.includes("units ordered"))) return "sales";
-  if (lower.includes("traffic") || keys.some(k => k.includes("session") || k.includes("pageview"))) return "traffic";
-  if (lower.includes("search") || lower.includes("searchterm") || keys.some(k => k.includes("searchterm") || k.includes("customer search"))) return "searchTerm";
-  if (lower.includes("campaign") || lower.includes("bulk") || lower.includes("sponsored") || keys.some(k => k.includes("entity") || k.includes("campaignname"))) return "campaign";
+  const h = headers.map(x => x.toLowerCase());
+
+  // Bulk campaign file — has "Entity" column (the key signal)
+  if (h.includes("entity")) return "bulk";
+  // Vendor Central Sales
+  if (lower.includes("sales") || h.includes("ordered revenue")) return "sales";
+  // Vendor Central Traffic
+  if (lower.includes("traffic") || h.includes("featured offer page views")) return "traffic";
+  // Search term report (standalone, not inside bulk)
+  if (lower.includes("search") || h.includes("customer search term")) return "searchTerm";
+
   return null;
 }
 
-// ── Score color ──
 function scoreColor(score: number) {
   if (score >= 80) return "#22c55e";
   if (score >= 65) return "#f59e0b";
   return "#ef4444";
 }
-function scoreLabel(score: number) {
-  if (score >= 80) return "Healthy";
-  if (score >= 65) return "Needs Attention";
-  if (score >= 50) return "At Risk";
-  return "Critical";
+
+interface UploadedFile {
+  name: string;
+  type: FileType;
+  rows: number;
+  sheets?: string[];
 }
 
 export default function Home() {
-  const [screen, setScreen] = useState<"upload" | "chat">("upload");
-  const [files, setFiles] = useState<{ name: string; type: keyof RawData; rows: number }[]>([]);
-  const [rawData, setRawData] = useState<Partial<RawData>>({});
-  const [audit, setAudit] = useState<AuditResult | null>(null);
-  const [messages, setMessages] = useState<ChatMessage[]>([]);
-  const [input, setInput] = useState("");
-  const [isTyping, setIsTyping] = useState(false);
-  const [apiKey, setApiKey] = useState("");
+  const [screen, setScreen]         = useState<"upload" | "chat">("upload");
+  const [uploadedFiles, setUploadedFiles] = useState<UploadedFile[]>([]);
+  const [rawData, setRawData]       = useState<Partial<RawData>>({});
+  const [audit, setAudit]           = useState<AuditResult | null>(null);
+  const [messages, setMessages]     = useState<ChatMessage[]>([]);
+  const [input, setInput]           = useState("");
+  const [isTyping, setIsTyping]     = useState(false);
+  const [apiKey, setApiKey]         = useState("");
   const [showApiKey, setShowApiKey] = useState(false);
-  const [brandName, setBrandName] = useState("Your Account");
+  const [brandName, setBrandName]   = useState("");
   const [activeTopic, setActiveTopic] = useState("all");
   const [isDragging, setIsDragging] = useState(false);
+  const [parseError, setParseError] = useState("");
   const messagesEndRef = useRef<HTMLDivElement>(null);
-  const fileInputRef = useRef<HTMLInputElement>(null);
+  const fileInputRef   = useRef<HTMLInputElement>(null);
 
   useEffect(() => { messagesEndRef.current?.scrollIntoView({ behavior: "smooth" }); }, [messages]);
 
   // ── File handling ──
   const handleFiles = useCallback(async (fileList: FileList) => {
-    const newFiles: typeof files = [];
+    setParseError("");
     const newRaw: Partial<RawData> = { ...rawData };
+    const newFiles: UploadedFile[] = [...uploadedFiles];
+
     for (const file of Array.from(fileList)) {
-      const buf = await file.arrayBuffer();
-      const rows = parseExcel(buf);
-      const type = guessFileType(file.name, rows);
-      if (!type) continue;
-      newRaw[type] = rows as RawData[typeof type];
-      newFiles.push({ name: file.name, type, rows: rows.length });
-    }
-    setRawData(newRaw);
-    setFiles((prev) => {
-      const merged = [...prev];
-      for (const f of newFiles) {
-        const idx = merged.findIndex(x => x.type === f.type);
-        if (idx >= 0) merged[idx] = f; else merged.push(f);
+      try {
+        const buf = await file.arrayBuffer();
+        const wb  = XLSX.read(buf, { type: "array" });
+
+        // Check if it's a bulk file (has "Sponsored Products Campaigns" sheet)
+        const spCampSheet = wb.SheetNames.find(n =>
+          n.toLowerCase().includes("sponsored products campaigns") ||
+          n.toLowerCase().includes("sp campaigns")
+        );
+        const spSTSheet = wb.SheetNames.find(n =>
+          n.toLowerCase().includes("sp search term") ||
+          n.toLowerCase().includes("search term report")
+        );
+
+        if (spCampSheet) {
+          // Bulk campaign file
+          const campRows = parseSheet(wb.Sheets[spCampSheet]);
+          newRaw.campaign = campRows as RawData["campaign"];
+
+          if (spSTSheet) {
+            const stRows = parseSheet(wb.Sheets[spSTSheet]);
+            newRaw.searchTerm = stRows as RawData["searchTerm"];
+          }
+
+          const existing = newFiles.findIndex(f => f.type === "bulk");
+          const entry: UploadedFile = {
+            name: file.name,
+            type: "bulk",
+            rows: campRows.length,
+            sheets: wb.SheetNames,
+          };
+          if (existing >= 0) newFiles[existing] = entry;
+          else newFiles.push(entry);
+        } else {
+          // Single-sheet file — detect type
+          const ws      = wb.Sheets[wb.SheetNames[0]];
+          const rows    = parseSheet(ws);
+          const headers = rows[0] ? Object.keys(rows[0]) : [];
+          const type    = detectFileType(file.name, headers);
+
+          if (!type) {
+            setParseError(`Could not identify "${file.name}". Expected Sales, Traffic, or Bulk Campaign file.`);
+            continue;
+          }
+
+          if (type === "sales")      newRaw.sales      = rows as RawData["sales"];
+          if (type === "traffic")    newRaw.traffic     = rows as RawData["traffic"];
+          if (type === "searchTerm") newRaw.searchTerm  = rows as RawData["searchTerm"];
+
+          const existing = newFiles.findIndex(f => f.type === type);
+          const entry: UploadedFile = { name: file.name, type, rows: rows.length };
+          if (existing >= 0) newFiles[existing] = entry;
+          else newFiles.push(entry);
+        }
+      } catch (e) {
+        setParseError(`Error reading "${file.name}". Make sure it is a valid .xlsx file.`);
       }
-      return merged;
-    });
-  }, [rawData]);
+    }
+
+    setRawData(newRaw);
+    setUploadedFiles(newFiles);
+  }, [rawData, uploadedFiles]);
 
   const onDrop = useCallback((e: React.DragEvent) => {
     e.preventDefault();
@@ -100,34 +188,37 @@ export default function Home() {
     if (e.dataTransfer.files.length) handleFiles(e.dataTransfer.files);
   }, [handleFiles]);
 
-  const canAnalyze = files.some(f => f.type === "campaign") || files.some(f => f.type === "sales");
+  const canAnalyze = uploadedFiles.some(f => f.type === "bulk") || uploadedFiles.some(f => f.type === "sales");
 
+  // ── Start Analysis ──
   const startAnalysis = () => {
     if (!canAnalyze) return;
     const data: RawData = {
-      sales: (rawData.sales ?? []) as Record<string, unknown>[],
-      traffic: (rawData.traffic ?? []) as Record<string, unknown>[],
-      campaign: (rawData.campaign ?? []) as Record<string, unknown>[],
-      searchTerm: (rawData.searchTerm ?? []) as Record<string, unknown>[],
+      sales:      (rawData.sales      ?? []) as Record<string, unknown>[],
+      traffic:    (rawData.traffic     ?? []) as Record<string, unknown>[],
+      campaign:   (rawData.campaign    ?? []) as Record<string, unknown>[],
+      searchTerm: (rawData.searchTerm  ?? []) as Record<string, unknown>[],
     };
     const result = runAuditEngine(data);
     setAudit(result);
-    if (brandName === "Your Account" && files[0]) {
-      const guess = files[0].name.replace(/[_-]/g, " ").replace(/\.[^.]+$/, "").replace(/sales|traffic|campaign|data|report/gi, "").trim();
-      if (guess) setBrandName(guess);
-    }
     setScreen("chat");
-    const totalRows = files.reduce((s, f) => s + f.rows, 0);
+
+    const totalRows = uploadedFiles.reduce((s, f) => s + f.rows, 0);
+    const brand = brandName.trim() || result.summary.topBrand || "Your Account";
+    if (!brandName.trim()) setBrandName(brand);
+
     addBotMessage(
-      `Good morning! I've analyzed <strong>${totalRows.toLocaleString()} rows</strong> across your ${files.length} uploaded file${files.length !== 1 ? "s" : ""}. Here's your snapshot:` +
+      `I've analyzed <strong>${totalRows.toLocaleString()} rows</strong> across ${uploadedFiles.length} file${uploadedFiles.length !== 1 ? "s" : ""} for <strong>${brand}</strong>. Here's the snapshot:` +
       `<div class="chip-row">` +
       `<div class="chip-stat ${result.score < 65 ? "red" : result.score < 80 ? "yellow" : "green"}"><span>${result.score}</span>Health Score</div>` +
-      `<div class="chip-stat red"><span>${fmt$(result.totalWeeklyWaste)}</span>Weekly Waste</div>` +
-      `<div class="chip-stat green"><span>${fmt$(result.totalMonthlyOpportunity)}</span>Opp/Month</div>` +
+      (result.hasCampaignData ? `<div class="chip-stat red"><span>${fmt$(result.totalWaste)}</span>Total Waste</div>` : "") +
+      (result.hasCampaignData ? `<div class="chip-stat green"><span>${fmt$(result.totalOpportunity)}</span>Opp/Month</div>` : "") +
+      (result.hasSalesData ? `<div class="chip-stat blue"><span>${fmt$(result.summary.totalOrderedRevenue)}</span>Total Revenue</div>` : "") +
       `<div class="chip-stat ${result.criticalCount > 0 ? "red" : "green"}"><span>${result.criticalCount}</span>Critical Issues</div>` +
       `</div>` +
-      (result.topWaste[0] ? `Your biggest risk: <strong>${result.topWaste[0].title}</strong> — ${result.topWaste[0].action}<br>` : "") +
-      (result.topOpportunities[0] ? `Your biggest opportunity: <strong>${result.topOpportunities[0].title}</strong><br>` : "") +
+      (result.topWaste[0] ? `<strong>Top risk:</strong> ${result.topWaste[0].title}<br>` : "") +
+      (result.topOpportunities[0] ? `<strong>Top opportunity:</strong> ${result.topOpportunities[0].title}<br>` : "") +
+      (!result.hasCampaignData ? `<br>💡 <em>Upload the <strong>Bulk Campaign File</strong> to unlock keyword, ACOS, and spend analysis.</em>` : "") +
       `<br>What would you like to explore first?`
     );
   };
@@ -145,13 +236,11 @@ export default function Home() {
 
     const intent = getIntent(text);
 
-    // PowerPoint — special flow
     if (intent === "powerpoint") {
       setIsTyping(false);
       addBotMessage(
-        `Generating your presentation...<br><br>` +
-        `<strong>8 slides being prepared:</strong><br>` +
-        `1. Title Slide<br>2. Executive Summary<br>3. Account Scorecard<br>` +
+        `Preparing your presentation — <strong>8 slides</strong> from your data:<br><br>` +
+        `1. Title &amp; Account Overview<br>2. Executive Summary<br>3. Account Scorecard<br>` +
         `4. Budget Waste Analysis<br>5. Keyword Audit<br>6. Search Term Opportunities<br>` +
         `7. ASIN Cohort Analysis<br>8. 30-Day Action Plan<br><br>` +
         `<button class="dl-btn" onclick="window._downloadPptx && window._downloadPptx()">⬇ Download PowerPoint</button>`
@@ -159,32 +248,27 @@ export default function Home() {
       return;
     }
 
-    // Get local answer first (instant, accurate)
-    const localAnswer = buildLocalResponse(audit, intent, text);
-
-    // Try LLM enhancement if API key available
-    if (apiKey || process.env.NEXT_PUBLIC_OPENAI_KEY) {
+    // Try OpenAI if key available
+    if (apiKey) {
       try {
-        const res = await fetch("/api/chat", {
+        const res  = await fetch("/api/chat", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ question: text, audit, apiKey }),
         });
         const data = await res.json();
-        if (data.answer && data.error !== "NO_API_KEY") {
+        if (data.answer && !data.error) {
           setIsTyping(false);
           addBotMessage(data.answer);
           return;
         }
-      } catch {
-        // fall through to local
-      }
+      } catch { /* fall through */ }
     }
 
-    // Use local answer
-    await new Promise(r => setTimeout(r, 600 + Math.random() * 400));
+    // Local rule-based answer
+    await new Promise(r => setTimeout(r, 500 + Math.random() * 400));
     setIsTyping(false);
-    addBotMessage(localAnswer);
+    addBotMessage(buildLocalResponse(audit, intent, text));
   }
 
   // ── PowerPoint download ──
@@ -195,270 +279,343 @@ export default function Home() {
         const res = await fetch("/api/pptx", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ audit, brandName }),
+          body: JSON.stringify({ audit, brandName: brandName || "Account" }),
         });
         if (!res.ok) throw new Error("Failed");
         const blob = await res.blob();
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement("a");
+        const url  = URL.createObjectURL(blob);
+        const a    = document.createElement("a");
         a.href = url;
-        a.download = `${brandName.replace(/\s+/g, "_")}_Audit.pptx`;
+        a.download = `${(brandName || "Account").replace(/\s+/g, "_")}_Audit.pptx`;
         a.click();
         URL.revokeObjectURL(url);
-      } catch {
-        alert("Could not generate PowerPoint. Please try again.");
-      }
+      } catch { alert("Could not generate PowerPoint. Please try again."); }
     };
   }, [audit, brandName]);
 
-  const handleTopicClick = (topic: string, q: string) => {
-    setActiveTopic(topic);
-    sendMessage(q);
+  const resetApp = () => {
+    setScreen("upload"); setMessages([]); setAudit(null);
+    setUploadedFiles([]); setRawData({}); setBrandName("");
   };
 
-  // ── RENDER ──
+  // ── File type display ──
+  const fileIcon = (type: FileType) =>
+    ({ bulk: "🗂️", sales: "📊", traffic: "📈", searchTerm: "🔍", campaign: "🗂️" }[type] ?? "📄");
+  const fileTypeLabel = (type: FileType) =>
+    ({ bulk: "Bulk Campaign", sales: "Sales", traffic: "Traffic", searchTerm: "Search Terms", campaign: "Campaign" }[type] ?? type);
+
   return (
     <>
       <style>{`
-        *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
-        body { font-family: -apple-system, "Segoe UI", system-ui, sans-serif; background: #f0f2f5; }
-        .app { display: flex; flex-direction: column; height: 100vh; overflow: hidden; }
+        *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+        body{font-family:-apple-system,"Segoe UI",system-ui,sans-serif;background:#f0f2f5;color:#1f2328}
+        .app{display:flex;flex-direction:column;height:100vh;overflow:hidden}
 
         /* NAV */
-        .topnav { background: #1a1f2e; color: #fff; padding: 0 20px; height: 52px; display: flex; align-items: center; justify-content: space-between; flex-shrink: 0; }
-        .logo { font-size: 16px; font-weight: 800; }
-        .logo span { color: #3b82d4; }
-        .nav-right { display: flex; align-items: center; gap: 12px; font-size: 12px; color: #8b949e; }
-        .brand-badge { background: #2d3748; border-radius: 6px; padding: 4px 10px; font-size: 12px; color: #e2e8f0; font-weight: 600; }
-        .api-btn { background: none; border: 1px solid #3d4a5c; color: #8b949e; border-radius: 6px; padding: 4px 10px; font-size: 11px; cursor: pointer; }
-        .api-btn:hover { border-color: #3b82d4; color: #3b82d4; }
-        .status-dot { width: 7px; height: 7px; border-radius: 50%; background: #22c55e; display: inline-block; margin-right: 4px; }
+        .topnav{background:${brand.navBg};color:#fff;padding:0 20px;height:52px;display:flex;align-items:center;justify-content:space-between;flex-shrink:0}
+        .logo{font-size:16px;font-weight:800;letter-spacing:.02em}
+        .logo span{color:${brand.navAccent}}
+        .nav-right{display:flex;align-items:center;gap:12px}
+        .brand-badge{background:rgba(255,255,255,.1);border-radius:6px;padding:4px 12px;font-size:12px;color:#e2e8f0;font-weight:600}
+        .api-btn{background:none;border:1px solid rgba(255,255,255,.15);color:#8b949e;border-radius:6px;padding:4px 10px;font-size:11px;cursor:pointer;transition:all .15s}
+        .api-btn:hover,.api-btn.connected{border-color:${brand.accentColor};color:${brand.accentColor}}
+        .status-dot{width:7px;height:7px;border-radius:50%;background:#22c55e;display:inline-block;margin-right:4px}
+        .nav-meta{font-size:12px;color:#8b949e}
 
-        /* MAIN */
-        .main { display: flex; flex: 1; overflow: hidden; }
+        /* LAYOUT */
+        .main{display:flex;flex:1;overflow:hidden}
 
         /* SIDEBAR */
-        .sidebar { width: 248px; min-width: 248px; background: #fff; border-right: 1px solid #e5e7eb; display: flex; flex-direction: column; overflow-y: auto; }
-        .sb-section { padding: 14px; border-bottom: 1px solid #f0f0f0; }
-        .sb-title { font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.07em; color: #57606a; margin-bottom: 8px; }
-        .file-item { display: flex; align-items: center; gap: 8px; padding: 6px 8px; border-radius: 6px; background: #f7f8fa; margin-bottom: 4px; border: 1px solid #e5e7eb; }
-        .file-name { font-size: 12px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; flex: 1; }
-        .file-meta { font-size: 10px; color: #57606a; }
-        .file-check { color: #22c55e; font-weight: 700; font-size: 13px; }
+        .sidebar{width:252px;min-width:252px;background:#fff;border-right:1px solid #e5e7eb;display:flex;flex-direction:column;overflow-y:auto}
+        .sb-section{padding:14px 14px 10px;border-bottom:1px solid #f0f0f0}
+        .sb-title{font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.07em;color:#57606a;margin-bottom:8px}
+
+        /* FILE ITEMS */
+        .file-item{display:flex;align-items:center;gap:8px;padding:7px 8px;border-radius:7px;background:#f7f8fa;margin-bottom:4px;border:1px solid #e5e7eb}
+        .fi-icon{font-size:15px;flex-shrink:0}
+        .fi-info{flex:1;min-width:0}
+        .fi-name{font-size:12px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+        .fi-meta{font-size:10px;color:#57606a}
+        .fi-check{color:#22c55e;font-weight:700;font-size:13px;flex-shrink:0}
 
         /* SCORE CARD */
-        .score-card { background: #1a1f2e; border-radius: 10px; padding: 14px; color: #fff; text-align: center; }
-        .score-big { font-size: 46px; font-weight: 900; line-height: 1; }
-        .score-tag-label { font-size: 10px; text-transform: uppercase; letter-spacing: 0.07em; color: #8b949e; margin-bottom: 2px; }
-        .score-status { font-size: 11px; font-weight: 700; margin-top: 4px; }
-        .score-divider { border: none; border-top: 1px solid #3d4a5c; margin: 10px 0; }
-        .score-row { display: flex; justify-content: space-between; margin-bottom: 4px; font-size: 11px; }
-        .score-row .label { color: #8b949e; }
+        .score-card{background:${brand.scoreCardBg};border-radius:10px;padding:14px;color:#fff;text-align:center}
+        .sc-label{font-size:10px;text-transform:uppercase;letter-spacing:.07em;color:#8b949e;margin-bottom:2px}
+        .sc-num{font-size:48px;font-weight:900;line-height:1}
+        .sc-status{font-size:11px;font-weight:700;margin-top:3px}
+        .sc-divider{border:none;border-top:1px solid #3d4a5c;margin:10px 0}
+        .sc-row{display:flex;justify-content:space-between;margin-bottom:4px;font-size:11px}
+        .sc-row .lbl{color:#8b949e}
 
-        /* NAV LINKS */
-        .nav-link { display: flex; align-items: center; gap: 8px; padding: 7px 10px; border-radius: 6px; font-size: 13px; color: #1f2328; cursor: pointer; margin-bottom: 2px; }
-        .nav-link:hover { background: #f7f8fa; }
-        .nav-link.active { background: #eff6ff; color: #3b82d4; font-weight: 600; }
-        .nl-badge { margin-left: auto; background: #fee2e2; color: #991b1b; font-size: 10px; font-weight: 700; padding: 1px 6px; border-radius: 10px; }
-        .nl-badge.green { background: #dcfce7; color: #166534; }
+        /* QUICK NAV */
+        .nav-link{display:flex;align-items:center;gap:8px;padding:7px 10px;border-radius:6px;font-size:13px;color:#1f2328;cursor:pointer;margin-bottom:2px}
+        .nav-link:hover{background:#f7f8fa}
+        .nav-link.active{background:${brand.accentColor}18;color:${brand.accentColor};font-weight:600}
+        .nl-badge{margin-left:auto;background:#fee2e2;color:#991b1b;font-size:10px;font-weight:700;padding:1px 6px;border-radius:10px}
+        .nl-badge.green{background:#dcfce7;color:#166534}
 
-        /* UPLOAD */
-        .upload-screen { flex: 1; display: flex; align-items: center; justify-content: center; padding: 32px; background: #f0f2f5; }
-        .upload-card { background: #fff; border: 1px solid #e5e7eb; border-radius: 16px; padding: 40px; max-width: 540px; width: 100%; }
-        .upload-card h1 { font-size: 24px; font-weight: 800; margin-bottom: 6px; }
-        .upload-card p { color: #57606a; font-size: 14px; margin-bottom: 24px; }
-        .drop-zone { border: 2px dashed #c7d2fe; border-radius: 12px; padding: 28px; text-align: center; cursor: pointer; background: #f8f9ff; transition: all 0.15s; margin-bottom: 16px; }
-        .drop-zone:hover, .drop-zone.dragging { border-color: #3b82d4; background: #eff6ff; }
-        .drop-icon { font-size: 36px; margin-bottom: 8px; }
-        .drop-text { font-size: 14px; font-weight: 600; }
-        .drop-sub { font-size: 12px; color: #57606a; margin-top: 4px; }
-        .file-types { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 16px; }
-        .ft { background: #f7f8fa; border: 1px solid #e5e7eb; border-radius: 6px; padding: 3px 10px; font-size: 11px; font-weight: 600; color: #57606a; }
-        .uploaded-files { margin: 12px 0; }
-        .uf-item { display: flex; align-items: center; gap: 8px; padding: 7px 0; border-bottom: 1px solid #f0f0f0; font-size: 12px; }
-        .uf-item:last-child { border-bottom: none; }
-        .uf-check { color: #22c55e; font-weight: 700; }
-        .uf-type { background: #eff6ff; color: #3b82d4; padding: 1px 6px; border-radius: 4px; font-size: 10px; font-weight: 700; text-transform: uppercase; }
-        .analyze-btn { width: 100%; background: #3b82d4; color: #fff; border: none; border-radius: 8px; padding: 13px; font-size: 14px; font-weight: 700; cursor: pointer; margin-top: 8px; }
-        .analyze-btn:disabled { background: #c7d2fe; cursor: not-allowed; }
-        .analyze-btn:not(:disabled):hover { background: #2563eb; }
-        .brand-input { width: 100%; border: 1px solid #e5e7eb; border-radius: 6px; padding: 8px 12px; font-size: 13px; margin-bottom: 12px; outline: none; }
-        .brand-input:focus { border-color: #3b82d4; }
+        /* UPLOAD SCREEN */
+        .upload-screen{flex:1;display:flex;align-items:center;justify-content:center;padding:32px;overflow-y:auto}
+        .upload-card{background:#fff;border:1px solid #e5e7eb;border-radius:16px;padding:40px;max-width:560px;width:100%}
+        .upload-card h1{font-size:22px;font-weight:800;margin-bottom:6px}
+        .upload-card p{color:#57606a;font-size:13px;margin-bottom:24px;line-height:1.6}
+        .brand-row{display:flex;gap:8px;margin-bottom:16px}
+        .brand-input{flex:1;border:1px solid #e5e7eb;border-radius:8px;padding:9px 12px;font-size:13px;outline:none;font-family:inherit}
+        .brand-input:focus{border-color:${brand.accentColor}}
 
-        /* CHAT */
-        .chat-screen { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
-        .chat-header { background: #fff; border-bottom: 1px solid #e5e7eb; padding: 12px 20px; display: flex; align-items: center; justify-content: space-between; flex-shrink: 0; }
-        .ch-title { font-weight: 700; font-size: 15px; }
-        .ch-sub { font-size: 11px; color: #57606a; margin-top: 1px; }
-        .ch-actions { display: flex; gap: 8px; }
-        .ch-btn { border: 1px solid #e5e7eb; background: #fff; border-radius: 6px; padding: 6px 12px; font-size: 12px; font-weight: 600; cursor: pointer; }
-        .ch-btn:hover { background: #f7f8fa; }
-        .ch-btn.primary { background: #3b82d4; color: #fff; border-color: #3b82d4; }
-        .ch-btn.primary:hover { background: #2563eb; }
+        /* FILE SLOTS */
+        .file-slots{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:16px}
+        .file-slot{border:1px dashed #d1d5db;border-radius:8px;padding:12px;text-align:center;cursor:pointer;transition:all .15s}
+        .file-slot:hover{border-color:#3b82d4;background:#f8faff}
+        .file-slot.filled{border-style:solid;border-color:#22c55e;background:#f0fdf4}
+        .file-slot.required{border-color:#f59e0b}
+        .slot-icon{font-size:20px;margin-bottom:4px}
+        .slot-name{font-size:12px;font-weight:700;color:#1f2328}
+        .slot-sub{font-size:10px;color:#57606a;margin-top:2px}
+        .slot-filled{font-size:10px;color:#22c55e;font-weight:600;margin-top:3px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:100%}
+        .slot-badge{display:inline-block;font-size:9px;font-weight:700;padding:1px 5px;border-radius:3px;margin-bottom:3px}
+        .slot-badge.req{background:#fef3c7;color:#92400e}
+        .slot-badge.opt{background:#f0f9ff;color:#0369a1}
+
+        /* DROP ZONE */
+        .drop-zone{border:2px dashed #c7d2fe;border-radius:10px;padding:20px;text-align:center;cursor:pointer;background:#f8f9ff;transition:all .15s;margin-bottom:16px}
+        .drop-zone:hover,.drop-zone.dragging{border-color:#3b82d4;background:#eff6ff}
+        .drop-icon{font-size:28px;margin-bottom:6px}
+        .drop-text{font-size:13px;font-weight:600}
+        .drop-sub{font-size:11px;color:#57606a;margin-top:3px}
+
+        /* ANALYZE BTN */
+        .analyze-btn{width:100%;background:${brand.accentColor};color:#fff;border:none;border-radius:8px;padding:13px;font-size:14px;font-weight:700;cursor:pointer;transition:background .15s}
+        .analyze-btn:disabled{background:${brand.accentColor}99;cursor:not-allowed}
+        .analyze-btn:not(:disabled):hover{background:${brand.accentHover}}
+        .parse-error{background:#fef2f2;border:1px solid #fecaca;border-radius:6px;padding:8px 12px;font-size:12px;color:#991b1b;margin-bottom:12px}
+
+        /* CHAT SCREEN */
+        .chat-screen{flex:1;display:flex;flex-direction:column;overflow:hidden}
+        .chat-header{background:#fff;border-bottom:1px solid #e5e7eb;padding:12px 20px;display:flex;align-items:center;justify-content:space-between;flex-shrink:0}
+        .ch-title{font-weight:700;font-size:15px}
+        .ch-sub{font-size:11px;color:#57606a;margin-top:1px}
+        .ch-actions{display:flex;gap:8px}
+        .ch-btn{border:1px solid #e5e7eb;background:#fff;border-radius:6px;padding:6px 12px;font-size:12px;font-weight:600;cursor:pointer}
+        .ch-btn:hover{background:#f7f8fa}
+        .ch-btn.primary{background:${brand.accentColor};color:#fff;border-color:${brand.accentColor}}
+        .ch-btn.primary:hover{background:${brand.accentHover}}
 
         /* MESSAGES */
-        .messages { flex: 1; overflow-y: auto; padding: 20px; display: flex; flex-direction: column; gap: 14px; }
-        .msg-row { display: flex; gap: 10px; align-items: flex-start; }
-        .msg-row.user { flex-direction: row-reverse; align-self: flex-end; max-width: 75%; }
-        .msg-row.bot { align-self: flex-start; max-width: 85%; }
-        .avatar { width: 30px; height: 30px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 10px; font-weight: 800; flex-shrink: 0; }
-        .avatar.bot { background: #1a1f2e; color: #3b82d4; }
-        .avatar.user { background: #3b82d4; color: #fff; }
-        .bubble { padding: 11px 15px; border-radius: 12px; font-size: 13px; line-height: 1.6; }
-        .bubble.bot { background: #fff; border: 1px solid #e5e7eb; border-top-left-radius: 3px; }
-        .bubble.user { background: #3b82d4; color: #fff; border-top-right-radius: 3px; }
-        .typing-dots { display: flex; align-items: center; gap: 4px; padding: 4px 0; }
-        .typing-dots span { width: 6px; height: 6px; background: #adb5bd; border-radius: 50%; animation: bounce 1.2s infinite; display: inline-block; }
-        .typing-dots span:nth-child(2) { animation-delay: 0.2s; }
-        .typing-dots span:nth-child(3) { animation-delay: 0.4s; }
-        @keyframes bounce { 0%,60%,100%{transform:translateY(0)} 30%{transform:translateY(-5px)} }
+        .messages{flex:1;overflow-y:auto;padding:20px;display:flex;flex-direction:column;gap:14px}
+        .msg-row{display:flex;gap:10px;align-items:flex-start}
+        .msg-row.user{flex-direction:row-reverse;align-self:flex-end;max-width:75%}
+        .msg-row.bot{align-self:flex-start;max-width:88%}
+        .avatar{width:30px;height:30px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:800;flex-shrink:0}
+        .avatar.bot{background:${brand.navBg};color:${brand.accentColor}}
+        .avatar.user{background:${brand.accentColor};color:#fff}
+        .bubble{padding:11px 15px;border-radius:12px;font-size:13px;line-height:1.65}
+        .bubble.bot{background:#fff;border:1px solid #e5e7eb;border-top-left-radius:3px}
+        .bubble.user{background:${brand.accentColor};color:#fff;border-top-right-radius:3px}
+        .typing-dots{display:flex;align-items:center;gap:4px;padding:4px 0}
+        .typing-dots span{width:6px;height:6px;background:#adb5bd;border-radius:50%;animation:bounce 1.2s infinite;display:inline-block}
+        .typing-dots span:nth-child(2){animation-delay:.2s}
+        .typing-dots span:nth-child(3){animation-delay:.4s}
+        @keyframes bounce{0%,60%,100%{transform:translateY(0)}30%{transform:translateY(-5px)}}
 
         /* FINDING CARDS */
-        .fc { background: #fff8f8; border: 1px solid #fecaca; border-left: 3px solid #ef4444; border-radius: 6px; padding: 9px 11px; margin: 7px 0; font-size: 12px; }
-        .fc.opp { background: #f0fdf4; border-color: #86efac; border-left-color: #22c55e; }
-        .fc.warn { background: #fffbeb; border-color: #fde68a; border-left-color: #f59e0b; }
-        .fc-title { font-weight: 700; font-size: 13px; margin-bottom: 2px; }
-        .fc-detail { color: #57606a; line-height: 1.5; }
-        .fc-action { font-weight: 700; color: #991b1b; margin-top: 3px; font-size: 12px; }
+        .fc{background:#fff8f8;border:1px solid #fecaca;border-left:3px solid #ef4444;border-radius:6px;padding:9px 11px;margin:7px 0;font-size:12px}
+        .fc.opp{background:#f0fdf4;border-color:#86efac;border-left-color:#22c55e}
+        .fc.warn{background:#fffbeb;border-color:#fde68a;border-left-color:#f59e0b}
+        .fc-title{font-weight:700;font-size:13px;margin-bottom:2px}
+        .fc-detail{color:#57606a;line-height:1.5}
+        .fc-action{font-weight:700;color:#991b1b;margin-top:3px;font-size:12px}
 
         /* CHIPS */
-        .chip-row { display: flex; gap: 8px; margin: 8px 0; flex-wrap: wrap; }
-        .chip-stat { background: #f7f8fa; border: 1px solid #e5e7eb; border-radius: 8px; padding: 6px 12px; font-size: 12px; text-align: center; min-width: 80px; }
-        .chip-stat span { font-size: 18px; font-weight: 800; display: block; }
-        .chip-stat.red span { color: #ef4444; }
-        .chip-stat.green span { color: #22c55e; }
-        .chip-stat.yellow span { color: #f59e0b; }
+        .chip-row{display:flex;gap:8px;margin:8px 0;flex-wrap:wrap}
+        .chip-stat{background:#f7f8fa;border:1px solid #e5e7eb;border-radius:8px;padding:6px 12px;font-size:11px;text-align:center;min-width:80px}
+        .chip-stat span{font-size:18px;font-weight:800;display:block}
+        .chip-stat.red span{color:#ef4444}
+        .chip-stat.green span{color:#22c55e}
+        .chip-stat.yellow span{color:#f59e0b}
+        .chip-stat.blue span{color:${brand.accentColor}}
 
-        /* DOWNLOAD BTN */
-        .dl-btn { background: #3b82d4; color: #fff; border: none; border-radius: 6px; padding: 9px 18px; font-size: 13px; font-weight: 700; cursor: pointer; margin-top: 6px; }
-        .dl-btn:hover { background: #2563eb; }
+        /* DL BTN */
+        .dl-btn{background:${brand.accentColor};color:#fff;border:none;border-radius:6px;padding:9px 18px;font-size:13px;font-weight:700;cursor:pointer;margin-top:6px}
+        .dl-btn:hover{background:${brand.accentHover}}
 
         /* SUGGESTIONS */
-        .suggestions { padding: 8px 18px; display: flex; flex-wrap: wrap; gap: 6px; background: #f0f2f5; flex-shrink: 0; border-top: 1px solid #e5e7eb; }
-        .suggestion-chip { border: 1px solid #d1d5db; background: #fff; border-radius: 20px; padding: 5px 13px; font-size: 12px; color: #3b82d4; cursor: pointer; font-weight: 500; white-space: nowrap; }
-        .suggestion-chip:hover { background: #eff6ff; border-color: #3b82d4; }
+        .suggestions{padding:8px 18px;display:flex;flex-wrap:wrap;gap:6px;background:#f0f2f5;flex-shrink:0;border-top:1px solid #e5e7eb}
+        .suggestion-chip{border:1px solid #d1d5db;background:#fff;border-radius:20px;padding:5px 13px;font-size:12px;color:${brand.accentColor};cursor:pointer;font-weight:500;white-space:nowrap}
+        .suggestion-chip:hover{background:${brand.accentColor}14;border-color:${brand.accentColor}}
 
         /* INPUT */
-        .input-bar { padding: 11px 18px; background: #fff; border-top: 1px solid #e5e7eb; display: flex; gap: 10px; align-items: flex-end; flex-shrink: 0; }
-        .chat-input { flex: 1; border: 1px solid #e5e7eb; border-radius: 22px; padding: 9px 16px; font-size: 13px; font-family: inherit; resize: none; outline: none; background: #f7f8fa; color: #1f2328; line-height: 1.5; }
-        .chat-input:focus { border-color: #3b82d4; background: #fff; }
-        .send-btn { background: #3b82d4; color: #fff; border: none; border-radius: 50%; width: 40px; height: 40px; display: flex; align-items: center; justify-content: center; cursor: pointer; font-size: 16px; flex-shrink: 0; }
-        .send-btn:hover { background: #2563eb; }
-        .send-btn:disabled { background: #c7d2fe; cursor: not-allowed; }
+        .input-bar{padding:11px 18px;background:#fff;border-top:1px solid #e5e7eb;display:flex;gap:10px;align-items:flex-end;flex-shrink:0}
+        .chat-input{flex:1;border:1px solid #e5e7eb;border-radius:22px;padding:9px 16px;font-size:13px;font-family:inherit;resize:none;outline:none;background:#f7f8fa;color:#1f2328;line-height:1.5}
+        .chat-input:focus{border-color:${brand.accentColor};background:#fff}
+        .send-btn{background:${brand.accentColor};color:#fff;border:none;border-radius:50%;width:40px;height:40px;display:flex;align-items:center;justify-content:center;cursor:pointer;font-size:15px;flex-shrink:0}
+        .send-btn:hover{background:${brand.accentHover}}
+        .send-btn:disabled{background:${brand.accentColor}55;cursor:not-allowed}
 
-        /* API KEY MODAL */
-        .modal-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.4); display: flex; align-items: center; justify-content: center; z-index: 50; }
-        .modal { background: #fff; border-radius: 12px; padding: 28px; max-width: 420px; width: 90%; }
-        .modal h2 { font-size: 17px; font-weight: 700; margin-bottom: 6px; }
-        .modal p { font-size: 13px; color: #57606a; margin-bottom: 16px; line-height: 1.6; }
-        .modal-input { width: 100%; border: 1px solid #e5e7eb; border-radius: 6px; padding: 9px 12px; font-size: 13px; margin-bottom: 12px; outline: none; font-family: monospace; }
-        .modal-input:focus { border-color: #3b82d4; }
-        .modal-actions { display: flex; gap: 8px; justify-content: flex-end; }
-        .modal-btn { border: 1px solid #e5e7eb; background: #fff; border-radius: 6px; padding: 8px 16px; font-size: 13px; cursor: pointer; font-weight: 600; }
-        .modal-btn.save { background: #3b82d4; color: #fff; border-color: #3b82d4; }
-        .modal-note { font-size: 11px; color: #57606a; margin-top: 4px; }
-        .messages::-webkit-scrollbar { width: 4px; }
-        .messages::-webkit-scrollbar-thumb { background: #d1d5db; border-radius: 2px; }
+        /* MODAL */
+        .modal-overlay{position:fixed;inset:0;background:rgba(0,0,0,.4);display:flex;align-items:center;justify-content:center;z-index:50}
+        .modal{background:#fff;border-radius:12px;padding:28px;max-width:420px;width:90%}
+        .modal h2{font-size:17px;font-weight:700;margin-bottom:6px}
+        .modal p{font-size:13px;color:#57606a;margin-bottom:16px;line-height:1.6}
+        .modal-input{width:100%;border:1px solid #e5e7eb;border-radius:6px;padding:9px 12px;font-size:13px;margin-bottom:8px;outline:none;font-family:monospace}
+        .modal-input:focus{border-color:${brand.accentColor}}
+        .modal-note{font-size:11px;color:#57606a;margin-bottom:14px}
+        .modal-actions{display:flex;gap:8px;justify-content:flex-end}
+        .modal-btn{border:1px solid #e5e7eb;background:#fff;border-radius:6px;padding:8px 16px;font-size:13px;cursor:pointer;font-weight:600}
+        .modal-btn.save{background:${brand.accentColor};color:#fff;border-color:${brand.accentColor}}
+        .messages::-webkit-scrollbar{width:4px}
+        .messages::-webkit-scrollbar-thumb{background:#d1d5db;border-radius:2px}
       `}</style>
 
       <div className="app">
         {/* NAV */}
         <div className="topnav">
-          <div className="logo">Audit<span>AI</span></div>
+          <div className="logo">{brand.logoText}<span>{brand.logoAccent}</span></div>
           <div className="nav-right">
-            {screen === "chat" && <div className="brand-badge">{brandName}</div>}
+            {screen === "chat" && brandName && <div className="brand-badge">{brandName}</div>}
             {screen === "chat" && (
-              <button className="api-btn" onClick={() => setShowApiKey(true)}>
-                {apiKey ? "✓ OpenAI Connected" : "⚡ Add OpenAI Key"}
+              <button className={`api-btn${apiKey ? " connected" : ""}`} onClick={() => setShowApiKey(true)}>
+                {apiKey ? `✓ ${brand.apiKeyLabel}` : `⚡ Add ${brand.apiKeyLabel}`}
               </button>
             )}
-            <span><span className="status-dot" />Ready</span>
+            <span className="nav-meta"><span className="status-dot" />Ready</span>
           </div>
         </div>
 
         <div className="main">
-          {/* SIDEBAR — only in chat */}
+
+          {/* ── SIDEBAR (chat only) ── */}
           {screen === "chat" && audit && (
             <div className="sidebar">
               <div className="sb-section">
-                <div className="sb-title">Uploaded Files</div>
-                {files.map((f) => (
+                <div className="sb-title">Files Loaded</div>
+                {uploadedFiles.map(f => (
                   <div key={f.type} className="file-item">
-                    <span>{f.type === "sales" ? "📊" : f.type === "traffic" ? "📈" : f.type === "campaign" ? "🗂️" : "🔍"}</span>
-                    <div style={{ flex: 1, minWidth: 0 }}>
-                      <div className="file-name">{f.name}</div>
-                      <div className="file-meta">{f.rows.toLocaleString()} rows</div>
+                    <span className="fi-icon">{fileIcon(f.type)}</span>
+                    <div className="fi-info">
+                      <div className="fi-name">{f.name}</div>
+                      <div className="fi-meta">{fileTypeLabel(f.type)} · {f.rows.toLocaleString()} rows</div>
                     </div>
-                    <span className="file-check">✓</span>
+                    <span className="fi-check">✓</span>
                   </div>
                 ))}
               </div>
 
               <div className="sb-section">
-                <div className="sb-title">Account Health</div>
+                <div className="sb-title">Health Score</div>
                 <div className="score-card">
-                  <div className="score-tag-label">Health Score</div>
-                  <div className="score-big" style={{ color: scoreColor(audit.score) }}>{audit.score}</div>
-                  <div className="score-status" style={{ color: scoreColor(audit.score) }}>{audit.scoreLabel}</div>
-                  <hr className="score-divider" />
-                  <div className="score-row"><span className="label">Spend Efficiency</span><span style={{ color: scoreColor((audit.spendEfficiency / 70) * 100), fontWeight: 700 }}>{audit.spendEfficiency}/70</span></div>
-                  <div className="score-row"><span className="label">Structure Quality</span><span style={{ color: scoreColor((audit.structureQuality / 30) * 100), fontWeight: 700 }}>{audit.structureQuality}/30</span></div>
-                  <div className="score-row"><span className="label">Weekly Waste</span><span style={{ color: "#ef4444", fontWeight: 700 }}>{fmt$(audit.totalWeeklyWaste)}</span></div>
-                  <div className="score-row"><span className="label">Opportunity</span><span style={{ color: "#22c55e", fontWeight: 700 }}>{fmt$(audit.totalMonthlyOpportunity)}/mo</span></div>
+                  <div className="sc-label">Account Health</div>
+                  <div className="sc-num" style={{ color: scoreColor(audit.score) }}>{audit.score}</div>
+                  <div className="sc-status" style={{ color: scoreColor(audit.score) }}>{audit.scoreLabel}</div>
+                  <hr className="sc-divider" />
+                  {audit.hasCampaignData && <>
+                    <div className="sc-row"><span className="lbl">Spend Efficiency</span><span style={{ color: scoreColor((audit.spendEfficiency/70)*100), fontWeight:700 }}>{audit.spendEfficiency}/70</span></div>
+                    <div className="sc-row"><span className="lbl">Structure Quality</span><span style={{ color: scoreColor((audit.structureQuality/30)*100), fontWeight:700 }}>{audit.structureQuality}/30</span></div>
+                    <div className="sc-row"><span className="lbl">Total Waste</span><span style={{ color:"#ef4444", fontWeight:700 }}>{fmt$(audit.totalWaste)}</span></div>
+                    <div className="sc-row"><span className="lbl">Opportunity</span><span style={{ color:"#22c55e", fontWeight:700 }}>{fmt$(audit.totalOpportunity)}/mo</span></div>
+                  </>}
+                  {audit.hasSalesData && <>
+                    <div className="sc-row"><span className="lbl">Total Revenue</span><span style={{ color:"#3b82d4", fontWeight:700 }}>{fmt$(audit.summary.totalOrderedRevenue)}</span></div>
+                    <div className="sc-row"><span className="lbl">Total Units</span><span style={{ fontWeight:700 }}>{audit.summary.totalOrderedUnits.toLocaleString()}</span></div>
+                    <div className="sc-row"><span className="lbl">Return Rate</span><span style={{ color: audit.summary.returnRate > 0.12 ? "#ef4444" : "#22c55e", fontWeight:700 }}>{(audit.summary.returnRate*100).toFixed(1)}%</span></div>
+                  </>}
                 </div>
               </div>
 
               <div className="sb-section">
                 <div className="sb-title">Quick Topics</div>
                 {[
-                  { key: "all", icon: "💬", label: "All Topics" },
-                  { key: "waste", icon: "🔥", label: "Budget Waste", badge: audit.findings.filter(f => f.category === "waste").length, badgeColor: "" },
-                  { key: "opp", icon: "🚀", label: "Opportunities", badge: audit.findings.filter(f => f.category === "opportunity").length, badgeColor: "green" },
-                  { key: "keywords", icon: "🔑", label: "Keywords" },
-                  { key: "asins", icon: "📦", label: "ASINs" },
-                  { key: "campaigns", icon: "📣", label: "Campaigns" },
-                  { key: "pptx", icon: "📑", label: "Export Report" },
-                ].map((item) => (
+                  { key:"all",      icon:"💬", label:"All Topics" },
+                  { key:"summary",  icon:"📊", label:"Account Summary" },
+                  ...(audit.hasCampaignData ? [
+                    { key:"waste",    icon:"🔥", label:"Budget Waste",    badge: audit.findings.filter(f=>f.category==="waste").length,       badgeColor:"" },
+                    { key:"opp",      icon:"🚀", label:"Opportunities",   badge: audit.findings.filter(f=>f.category==="opportunity").length,  badgeColor:"green" },
+                    { key:"keywords", icon:"🔑", label:"Keywords" },
+                    { key:"campaigns",icon:"📣", label:"Campaigns" },
+                  ] : []),
+                  ...(audit.hasSalesData ? [
+                    { key:"asins",    icon:"📦", label:"ASINs" },
+                  ] : []),
+                  { key:"pptx",     icon:"📑", label:"Export Report" },
+                ].map(item => (
                   <div
                     key={item.key}
                     className={`nav-link${activeTopic === item.key ? " active" : ""}`}
                     onClick={() => {
-                      const qMap: Record<string, string> = {
-                        waste: "What is our biggest budget waste?",
-                        opp: "Show me top growth opportunities",
-                        keywords: "Which keywords should I pause?",
-                        asins: "Which ASINs need more ad support?",
+                      const qMap: Record<string,string> = {
+                        summary:   "Give me an overall account summary",
+                        waste:     "What is our biggest budget waste?",
+                        opp:       "Show me top growth opportunities",
+                        keywords:  "Which keywords should I pause?",
+                        asins:     "Show me the ASIN cohort analysis",
                         campaigns: "Show me campaign health overview",
-                        pptx: "Create a PowerPoint presentation of the full audit",
+                        pptx:      "Create a PowerPoint presentation of the full audit",
                       };
                       setActiveTopic(item.key);
                       if (qMap[item.key]) sendMessage(qMap[item.key]);
                     }}
                   >
                     <span>{item.icon}</span> {item.label}
-                    {item.badge ? <span className={`nl-badge ${item.badgeColor}`}>{item.badge}</span> : null}
+                    {"badge" in item && item.badge ? <span className={`nl-badge ${item.badgeColor}`}>{item.badge}</span> : null}
                   </div>
                 ))}
               </div>
             </div>
           )}
 
-          {/* UPLOAD SCREEN */}
+          {/* ── UPLOAD SCREEN ── */}
           {screen === "upload" && (
             <div className="upload-screen">
               <div className="upload-card">
-                <h1>Campaign Intelligence</h1>
-                <p>Upload your Amazon advertising reports and start asking questions instantly. Your data never leaves your browser.</p>
+                <h1>{brand.uploadHeading}</h1>
+                <p>{brand.uploadSubtext}</p>
 
-                <div style={{ marginBottom: 12 }}>
+                <div className="brand-row">
                   <input
                     className="brand-input"
                     placeholder="Brand / Account name (optional)"
-                    value={brandName === "Your Account" ? "" : brandName}
-                    onChange={e => setBrandName(e.target.value || "Your Account")}
+                    value={brandName}
+                    onChange={e => setBrandName(e.target.value)}
                   />
                 </div>
 
+                {/* File slots */}
+                <div className="file-slots">
+                  {[
+                    { type: "bulk",    label: "Bulk Campaign File", sub: "SP Campaigns + Search Terms", icon: "🗂️", required: true },
+                    { type: "sales",   label: "Sales by ASIN",      sub: "Vendor Central Sales Report",  icon: "📊", required: false },
+                    { type: "traffic", label: "Traffic by ASIN",    sub: "Vendor Central Traffic Report",icon: "📈", required: false },
+                  ].map(slot => {
+                    const filled = uploadedFiles.find(f => f.type === slot.type);
+                    return (
+                      <div
+                        key={slot.type}
+                        className={`file-slot${filled ? " filled" : slot.required ? " required" : ""}`}
+                        onClick={() => fileInputRef.current?.click()}
+                      >
+                        <div className="slot-icon">{slot.icon}</div>
+                        <span className={`slot-badge ${slot.required ? "req" : "opt"}`}>{slot.required ? "Required" : "Optional"}</span>
+                        <div className="slot-name">{slot.label}</div>
+                        <div className="slot-sub">{slot.sub}</div>
+                        {filled && <div className="slot-filled">✓ {filled.name} ({filled.rows.toLocaleString()} rows)</div>}
+                      </div>
+                    );
+                  })}
+                  <div
+                    className={`file-slot${uploadedFiles.find(f => f.type === "searchTerm") ? " filled" : ""}`}
+                    onClick={() => fileInputRef.current?.click()}
+                  >
+                    <div className="slot-icon">🔍</div>
+                    <span className="slot-badge opt">Optional</span>
+                    <div className="slot-name">Search Term Report</div>
+                    <div className="slot-sub">Standalone ST report</div>
+                    {uploadedFiles.find(f => f.type === "searchTerm") && (
+                      <div className="slot-filled">✓ {uploadedFiles.find(f => f.type === "searchTerm")!.name}</div>
+                    )}
+                  </div>
+                </div>
+
+                {/* Drop zone */}
                 <div
                   className={`drop-zone${isDragging ? " dragging" : ""}`}
                   onDragOver={e => { e.preventDefault(); setIsDragging(true); }}
@@ -467,50 +624,46 @@ export default function Home() {
                   onClick={() => fileInputRef.current?.click()}
                 >
                   <div className="drop-icon">📂</div>
-                  <div className="drop-text">Drop files here or click to upload</div>
-                  <div className="drop-sub">Excel (.xlsx) or CSV — Sales, Traffic, Campaign, Search Term reports</div>
-                  <input ref={fileInputRef} type="file" accept=".xlsx,.csv,.xls" multiple style={{ display: "none" }}
-                    onChange={e => e.target.files && handleFiles(e.target.files)} />
+                  <div className="drop-text">Drop files here or click to browse</div>
+                  <div className="drop-sub">Upload one or more files at once — app auto-detects each type</div>
+                  <input
+                    ref={fileInputRef}
+                    type="file"
+                    accept=".xlsx,.xls,.csv"
+                    multiple
+                    style={{ display: "none" }}
+                    onChange={e => e.target.files && handleFiles(e.target.files)}
+                  />
                 </div>
 
-                <div className="file-types">
-                  <span className="ft">📊 Sales Report</span>
-                  <span className="ft">📈 Traffic Report</span>
-                  <span className="ft">🗂️ Campaign Report</span>
-                  <span className="ft">🔍 Search Term Report</span>
-                </div>
+                {parseError && <div className="parse-error">⚠ {parseError}</div>}
 
-                {files.length > 0 && (
-                  <div className="uploaded-files">
-                    {files.map(f => (
-                      <div key={f.type} className="uf-item">
-                        <span className="uf-check">✓</span>
-                        <span style={{ flex: 1 }}>{f.name}</span>
-                        <span className="uf-type">{f.type}</span>
-                        <span style={{ fontSize: 11, color: "#57606a" }}>{f.rows.toLocaleString()} rows</span>
-                      </div>
-                    ))}
-                  </div>
-                )}
-
-                <button className="analyze-btn" disabled={!canAnalyze} onClick={startAnalysis}>
-                  {canAnalyze ? "Analyze My Data →" : "Upload at least one file to continue"}
+                <button
+                  className="analyze-btn"
+                  disabled={!canAnalyze}
+                  onClick={startAnalysis}
+                >
+                  {canAnalyze
+                    ? `Analyze ${uploadedFiles.reduce((s,f)=>s+f.rows,0).toLocaleString()} rows →`
+                    : "Upload the Bulk Campaign File or Sales Report to start"}
                 </button>
               </div>
             </div>
           )}
 
-          {/* CHAT SCREEN */}
+          {/* ── CHAT SCREEN ── */}
           {screen === "chat" && audit && (
             <div className="chat-screen">
               <div className="chat-header">
                 <div>
-                  <div className="ch-title">Campaign Intelligence Chat</div>
-                  <div className="ch-sub">{files.reduce((s, f) => s + f.rows, 0).toLocaleString()} rows analyzed · {audit.findings.length} findings · Ask anything</div>
+                  <div className="ch-title">{brand.appName}</div>
+                  <div className="ch-sub">
+                    {uploadedFiles.reduce((s,f)=>s+f.rows,0).toLocaleString()} rows · {audit.findings.length} findings · Ask anything
+                  </div>
                 </div>
                 <div className="ch-actions">
                   <button className="ch-btn primary" onClick={() => sendMessage("Create a PowerPoint presentation of the full audit")}>📑 Export PPT</button>
-                  <button className="ch-btn" onClick={() => { setScreen("upload"); setMessages([]); setAudit(null); setFiles([]); setRawData({}); }}>Upload New Files</button>
+                  <button className="ch-btn" onClick={resetApp}>Upload New Files</button>
                 </div>
               </div>
 
@@ -556,6 +709,7 @@ export default function Home() {
               </div>
             </div>
           )}
+
         </div>
       </div>
 
@@ -563,8 +717,8 @@ export default function Home() {
       {showApiKey && (
         <div className="modal-overlay" onClick={() => setShowApiKey(false)}>
           <div className="modal" onClick={e => e.stopPropagation()}>
-            <h2>Connect OpenAI (Optional)</h2>
-            <p>Without a key, the app uses smart rule-based answers from your data. With an OpenAI key, responses are enhanced with natural language — all facts still come from your data, never hallucinated.</p>
+            <h2>{brand.apiKeyLabel} (Optional)</h2>
+            <p>The app gives accurate, data-driven answers without a key. An OpenAI key enhances the language quality of responses — all numbers still come from your data, never hallucinated.</p>
             <input
               className="modal-input"
               type="password"
@@ -572,10 +726,10 @@ export default function Home() {
               value={apiKey}
               onChange={e => setApiKey(e.target.value)}
             />
-            <p className="modal-note">🔒 Your key is stored in your browser only. Never sent to any server except OpenAI directly.</p>
+            <p className="modal-note">🔒 Stored in your browser only. Sent directly to OpenAI — never to our servers.</p>
             <div className="modal-actions">
-              <button className="modal-btn" onClick={() => { setApiKey(""); setShowApiKey(false); }}>Clear & Close</button>
-              <button className="modal-btn save" onClick={() => setShowApiKey(false)}>Save Key</button>
+              <button className="modal-btn" onClick={() => { setApiKey(""); setShowApiKey(false); }}>Clear</button>
+              <button className="modal-btn save" onClick={() => setShowApiKey(false)}>Save</button>
             </div>
           </div>
         </div>
