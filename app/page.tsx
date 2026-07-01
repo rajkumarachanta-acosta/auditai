@@ -490,8 +490,8 @@ export default function Home() {
 
         /* CHIPS */
         .chip-row{display:flex;gap:8px;margin:8px 0;flex-wrap:wrap}
-        .chip-stat{background:#f7f8fa;border:1px solid #e5e7eb;border-radius:8px;padding:6px 12px;font-size:11px;text-align:center;min-width:80px}
-        .chip-stat span{font-size:18px;font-weight:800;display:block}
+        .chip-stat{background:#f7f8fa;border:1px solid #e5e7eb;border-radius:8px;padding:6px 10px;font-size:11px;text-align:center;min-width:70px;max-width:140px}
+        .chip-stat span{font-size:15px;font-weight:800;display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
         .chip-stat.red span{color:#ef4444}
         .chip-stat.green span{color:#22c55e}
         .chip-stat.yellow span{color:#f59e0b}
