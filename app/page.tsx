@@ -1,8 +1,9 @@
 "use client";
 import { useState, useRef, useEffect, useCallback } from "react";
 import * as XLSX from "xlsx";
-import { runAuditEngine, runQuery, AuditResult, RawData } from "@/lib/auditEngine";
-import { buildLocalResponse, buildComparisonTable, getIntent, ChatMessage } from "@/lib/chatEngine";
+import { runAuditEngine, AuditResult, RawData } from "@/lib/auditEngine";
+import { buildLocalResponse, buildComparisonTable, ChatMessage } from "@/lib/chatEngine";
+import { computeAnswer, ComputedAnswer } from "@/lib/computeEngine";
 import { brand } from "@/lib/brand";
 
 // ── Helpers ──
@@ -12,48 +13,6 @@ function fmt$(n: number): string {
   return `$${n.toFixed(0)}`;
 }
 function uid() { return Math.random().toString(36).slice(2); }
-
-// ── Render a QueryResult as HTML table + CSV download + next steps ──
-function renderQueryResult(result: NonNullable<ReturnType<typeof runQuery>>, question: string): string {
-  const TH = (l: string) => `<th style="padding:5px 8px;border-bottom:2px solid #e5e7eb;white-space:nowrap;color:#57606a;font-weight:600;text-align:left">${l}</th>`;
-  const TD = (v: string|number, i: number) => {
-    const s = String(v);
-    // Color ACOS red if high, green if good
-    const isAcos = i > 0 && typeof v === "string" && s.includes("%") && parseFloat(s) > 50;
-    const isReturn = i > 0 && typeof v === "string" && s.includes("%") && parseFloat(s) > 10;
-    const color = isAcos || isReturn ? "color:#ef4444" : "";
-    return `<td style="padding:4px 8px;border-bottom:1px solid #f0f0f0;${color}">${s}</td>`;
-  };
-
-  // Build CSV data URI for download button
-  const csvContent = [
-    result.columns.join(","),
-    ...result.rows.map(row => row.map(v => `"${String(v).replace(/"/g, '""')}"`).join(","))
-  ].join("\n");
-  const csvB64 = btoa(unescape(encodeURIComponent(csvContent)));
-  const filename = `${question.slice(0,30).replace(/[^a-z0-9]/gi,"_")}.csv`;
-
-  const table = `<div style="overflow-x:auto">
-<table style="width:100%;border-collapse:collapse;font-size:12px;margin-top:8px">
-<thead><tr>${result.columns.map(TH).join("")}</tr></thead>
-<tbody>${result.rows.map(row => `<tr>${row.map(TD).join("")}</tr>`).join("")}</tbody>
-</table></div>`;
-
-  const nextStepsHtml = result.nextSteps.length
-    ? `<div style="margin-top:12px;padding:10px 12px;background:#f0fdf4;border:1px solid #bbf7d0;border-radius:8px">
-        <div style="font-weight:700;color:#166534;margin-bottom:6px">📋 Next Steps</div>
-        ${result.nextSteps.map((s,i) => `<div style="margin-top:4px;font-size:12px"><strong>${i+1}.</strong> ${s}</div>`).join("")}
-      </div>` : "";
-
-  const csvBtn = `<div style="margin-top:10px">
-    <a href="data:text/csv;base64,${csvB64}" download="${filename}"
-       style="display:inline-block;padding:6px 14px;background:#3b82d4;color:#fff;border-radius:6px;font-size:12px;font-weight:600;text-decoration:none">
-      ⬇ Download CSV
-    </a>
-  </div>`;
-
-  return `<strong>${result.title}</strong>${result.count > result.rows.length ? ` — showing top ${result.rows.length}` : ""}:<br>${table}${nextStepsHtml}${csvBtn}`;
-}
 
 const SUGGESTIONS = [
   { label: "📊 Account overview", q: "Give me an overall account summary" },
@@ -325,9 +284,11 @@ export default function Home() {
     setInput("");
     setIsTyping(true);
 
-    const intent = getIntent(text);
+    // ── Step 1: Always compute locally first (zero tokens, instant) ──
+    const computed = computeAnswer(audit, text);
 
-    if (intent === "powerpoint") {
+    // PowerPoint
+    if (computed.intent === "powerpoint") {
       setIsTyping(false);
       addBotMessage(
         `Preparing your presentation — <strong>8 slides</strong> from your data:<br><br>` +
@@ -339,8 +300,8 @@ export default function Home() {
       return;
     }
 
-    // Compare intent with two audits loaded — show diff table immediately
-    if (intent === "compare" && compareAudit) {
+    // Period comparison
+    if (/compar|vs\b|versus|week.?over.?week|last.?week/i.test(text) && compareAudit) {
       await new Promise(r => setTimeout(r, 400));
       setIsTyping(false);
       addBotMessage(
@@ -350,27 +311,88 @@ export default function Home() {
       return;
     }
 
-    // Try OpenAI if key available
-    if (apiKey) {
+    // ── Step 2: Try GPT to format the computed answer conversationally ──
+    const key = apiKey || "";
+    if (key || process.env.NEXT_PUBLIC_HAS_KEY) {
       try {
         const res  = await fetch("/api/chat", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ question: text, audit, apiKey }),
+          body: JSON.stringify({ question: text, audit, apiKey: key }),
         });
         const data = await res.json();
-        if (data.answer && !data.error) {
+
+        if (data.answer) {
           setIsTyping(false);
-          addBotMessage(data.answer);
+          // GPT answer + computed table + CSV if available
+          addBotMessage(formatComputedResponse(data.answer, data.computed ?? computed, text));
           return;
         }
-      } catch { /* fall through */ }
+        // No API key or error — fall through to local
+        if (data.computed) {
+          await new Promise(r => setTimeout(r, 400));
+          setIsTyping(false);
+          addBotMessage(formatComputedResponse(null, data.computed, text));
+          return;
+        }
+      } catch { /* fall through to local */ }
     }
 
-    // Local rule-based answer
-    await new Promise(r => setTimeout(r, 500 + Math.random() * 400));
+    // ── Step 3: Local computed response (no API key needed) ──
+    await new Promise(r => setTimeout(r, 400));
     setIsTyping(false);
-    addBotMessage(buildLocalResponse(audit, intent, text));
+    addBotMessage(formatComputedResponse(null, computed, text));
+  }
+
+  // ── Format a computed answer into HTML — text + table + next steps + CSV ──
+  function formatComputedResponse(gptText: string | null, computed: ComputedAnswer, question: string): string {
+    const parts: string[] = [];
+
+    // GPT conversational text OR local headline
+    if (gptText) {
+      parts.push(gptText.replace(/\n/g, "<br>"));
+    } else {
+      // Local fallback — use buildLocalResponse for good formatting
+      parts.push(buildLocalResponse(audit!, "smart", question));
+      return parts[0]; // local response already handles everything
+    }
+
+    // Computed data table with CSV download
+    if (computed?.data?.rows.length) {
+      parts.push(renderComputedTable(computed, question));
+    }
+
+    return parts.join("<br>");
+  }
+
+  // ── Render computed table as HTML + CSV download button ──
+  function renderComputedTable(computed: ComputedAnswer, question: string): string {
+    if (!computed.data) return "";
+    const { columns, rows } = computed.data;
+
+    const TH = (l: string) => `<th style="padding:5px 8px;border-bottom:2px solid #e5e7eb;white-space:nowrap;color:#57606a;font-weight:600;text-align:left">${l}</th>`;
+    const TD = (v: string | number) => {
+      const s = String(v);
+      const isHighPct = s.includes("%") && parseFloat(s) > 50;
+      const color = isHighPct ? "color:#ef4444" : "";
+      return `<td style="padding:4px 8px;border-bottom:1px solid #f0f0f0;${color}">${s}</td>`;
+    };
+
+    const csvContent = [columns.join(","), ...rows.map(r => r.map(v => `"${String(v).replace(/"/g, '""')}"`).join(","))].join("\n");
+    const csvB64     = btoa(unescape(encodeURIComponent(csvContent)));
+    const filename   = `${question.slice(0, 30).replace(/[^a-z0-9]/gi, "_")}.csv`;
+
+    return `<div style="overflow-x:auto;margin-top:10px">
+<table style="width:100%;border-collapse:collapse;font-size:12px">
+<thead><tr>${columns.map(TH).join("")}</tr></thead>
+<tbody>${rows.map(r => `<tr>${r.map(TD).join("")}</tr>`).join("")}</tbody>
+</table></div>
+<div style="margin-top:8px">
+  <a href="data:text/csv;base64,${csvB64}" download="${filename}"
+     style="display:inline-block;padding:6px 14px;background:#3b82d4;color:#fff;border-radius:6px;font-size:12px;font-weight:600;text-decoration:none">
+    ⬇ Download CSV
+  </a>
+</div>`;
   }
 
   // ── PowerPoint download ──
