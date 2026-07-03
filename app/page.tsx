@@ -317,10 +317,17 @@ export default function Home() {
     const key = apiKey || "";
     {
       try {
+        // Strip heavy table data before sending — server only needs
+        // summary + findings + cohorts, not all 100k rows
+        const auditPayload = {
+          ...audit,
+          campaignTable: audit.campaignTable.slice(0, 50),
+          asinTable:     audit.asinTable.slice(0, 50),
+        };
         const res  = await fetch("/api/chat", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ question: text, audit, apiKey: key }),
+          body: JSON.stringify({ question: text, audit: auditPayload, apiKey: key }),
         });
         const data = await res.json();
 
