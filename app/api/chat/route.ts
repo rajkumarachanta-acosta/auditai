@@ -21,8 +21,8 @@ export async function POST(req: NextRequest) {
 
     const context = buildLLMContext(audit, question);
 
-    // Try GPT-4o first (best reasoning), fall back to gpt-3.5-turbo
-    const models = ["gpt-4o", "gpt-4-turbo", "gpt-3.5-turbo-16k", "gpt-3.5-turbo"];
+    // gpt-4o-mini: best value — smart enough for expert analysis at ~1/10th the cost of gpt-4o
+    const models = ["gpt-4o-mini", "gpt-4o", "gpt-3.5-turbo"];
 
     for (const model of models) {
       const response = await fetch("https://api.openai.com/v1/chat/completions", {

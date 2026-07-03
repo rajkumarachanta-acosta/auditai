@@ -46,6 +46,161 @@ export interface AsinRow {
   pageViews: number;
   returnRate: number;
   revenuePerView: number;
+  adSpend: number;
+  adSales: number;
+  adOrders: number;
+  adClicks: number;
+  acos: number;
+  cvr: number;
+  ctr: number;
+}
+
+// ── Flexible query result — used by chat engine to render tables + CSV ──
+export interface QueryResult {
+  title: string;                    // e.g. "Top 10 ASINs by CVR with high returns"
+  columns: string[];                // column headers
+  rows: (string | number)[][];      // data rows
+  csvKeys: string[];                // keys used for CSV export (matches columns)
+  nextSteps: string[];              // computed action items
+  count: number;                    // total matching rows before limit
+}
+
+// ── Run a smart query against the audit data ──
+export function runQuery(audit: AuditResult, question: string): QueryResult | null {
+  const q = question.toLowerCase();
+
+  const extractN = (text: string, def = 10): number => {
+    const m = text.match(/\b(\d+)\b/);
+    return m ? Math.min(parseInt(m[1]), 100) : def;
+  };
+
+  const fmtR = (n: number) => `$${n.toFixed(2)}`;
+  const fmtP = (n: number) => `${(n * 100).toFixed(2)}%`;
+  const fmtN = (n: number) => n.toLocaleString();
+
+  // ── ASIN queries ──
+  const isAsinQuery = /asin|product|item|sku/i.test(q);
+  const isCampQuery = /campaign/i.test(q);
+
+  if (isAsinQuery || (!isCampQuery && /revenue|return|cvr|convers|unit|page.?view|rev.*view/i.test(q))) {
+    const limit = extractN(q, 10);
+    let rows = [...audit.asinTable];
+
+    // Filters
+    if (/high.*return|return.*high|return.*rate.*above|above.*return/i.test(q)) {
+      const threshold = q.match(/(\d+)\s*%/) ? parseInt(q.match(/(\d+)\s*%/)![1]) / 100 : 0.1;
+      rows = rows.filter(a => a.returnRate >= threshold);
+    }
+    if (/high.*cvr|cvr.*high|best.*convers|top.*convers/i.test(q)) {
+      rows = rows.filter(a => a.cvr > 0.10);
+    }
+    if (/low.*cvr|cvr.*low|poor.*convers/i.test(q)) {
+      rows = rows.filter(a => a.cvr > 0 && a.cvr < 0.05);
+    }
+    if (/zero.*revenue|no.*revenue|wast/i.test(q)) {
+      rows = rows.filter(a => a.orderedRevenue === 0 && a.pageViews > 50);
+    }
+    if (/high.*acos|acos.*high/i.test(q)) {
+      rows = rows.filter(a => a.acos > 0.5 && a.adSpend > 0);
+    }
+    if (/cash.?cow/i.test(q)) {
+      const cows = new Set(audit.asinCohorts.filter(c => c.cohort === "cash_cow").map(c => c.asin));
+      rows = rows.filter(a => cows.has(a.asin));
+    }
+    if (/need.*love|underfund/i.test(q)) {
+      const love = new Set(audit.asinCohorts.filter(c => c.cohort === "need_love").map(c => c.asin));
+      rows = rows.filter(a => love.has(a.asin));
+    }
+
+    // Sort
+    if (/return/i.test(q) && /high|most|top/i.test(q)) rows.sort((a,b) => b.returnRate - a.returnRate);
+    else if (/cvr|convers/i.test(q) && /high|best|top/i.test(q)) rows.sort((a,b) => b.cvr - a.cvr);
+    else if (/cvr|convers/i.test(q) && /low|worst|bottom/i.test(q)) rows.sort((a,b) => a.cvr - b.cvr);
+    else if (/revenue/i.test(q)) rows.sort((a,b) => b.orderedRevenue - a.orderedRevenue);
+    else if (/spend/i.test(q)) rows.sort((a,b) => b.adSpend - a.adSpend);
+    else if (/acos/i.test(q)) rows.sort((a,b) => b.acos - a.acos);
+    else if (/page.?view|traffic|impression/i.test(q)) rows.sort((a,b) => b.pageViews - a.pageViews);
+    else if (/unit/i.test(q)) rows.sort((a,b) => b.orderedUnits - a.orderedUnits);
+    else rows.sort((a,b) => b.orderedRevenue - a.orderedRevenue);
+
+    const total = rows.length;
+    const shown = rows.slice(0, limit);
+    if (!shown.length) return null;
+
+    // Build next steps
+    const nextSteps: string[] = [];
+    const highReturn = shown.filter(a => a.returnRate > 0.1);
+    const highCvr    = shown.filter(a => a.cvr > 0.15);
+    const lowCvr     = shown.filter(a => a.cvr > 0 && a.cvr < 0.05);
+    const highAcos   = shown.filter(a => a.acos > 0.5 && a.adSpend > 0);
+    const zeroRev    = shown.filter(a => a.orderedRevenue === 0);
+
+    if (highReturn.length) nextSteps.push(`Review listings for ${highReturn.length} high-return ASINs (${highReturn[0].asin}) — check images, descriptions, sizing info`);
+    if (highCvr.length)    nextSteps.push(`Scale ad spend on ${highCvr.length} high-CVR ASINs — they convert above 15% and deserve more budget`);
+    if (lowCvr.length)     nextSteps.push(`Pause or reduce bids on ${lowCvr.length} low-CVR ASINs — getting clicks but not converting`);
+    if (highAcos.length)   nextSteps.push(`Reduce bids by 20-30% on ${highAcos.length} high-ACOS ASINs to improve profitability`);
+    if (zeroRev.length)    nextSteps.push(`Stop advertising ${zeroRev.length} zero-revenue ASINs — redirect budget to top performers`);
+    if (!nextSteps.length) nextSteps.push(`Monitor these ASINs weekly and adjust bids based on CVR trends`);
+
+    return {
+      title: `${shown.length} ASINs${total > limit ? ` (of ${total} matching)` : ""}`,
+      columns: ["#", "ASIN", "Product", "Brand", "Revenue", "Units", "Page Views", "CVR", "Return %", "ACOS", "Ad Spend"],
+      rows: shown.map((a, i) => [i+1, a.asin, a.title.slice(0,40), a.brand, fmtR(a.orderedRevenue), fmtN(a.orderedUnits), fmtN(a.pageViews), fmtP(a.cvr), fmtP(a.returnRate), fmtP(a.acos), fmtR(a.adSpend)]),
+      csvKeys: ["rank", "asin", "product", "brand", "revenue", "units", "pageViews", "cvr", "returnRate", "acos", "adSpend"],
+      nextSteps,
+      count: total,
+    };
+  }
+
+  // ── Campaign queries ──
+  if (isCampQuery || /spend|acos|ctr|click|impression/i.test(q)) {
+    const limit = extractN(q, 10);
+    let rows = [...audit.campaignTable];
+
+    // Filters
+    if (/zero.*sales|no.*sales|wast/i.test(q))       rows = rows.filter(c => c.sales === 0 && c.spend > 0);
+    if (/high.*acos|acos.*high/i.test(q))             rows = rows.filter(c => c.acos > 0.5 && c.sales > 0);
+    if (/low.*ctr|ctr.*low/i.test(q))                 rows = rows.filter(c => c.ctr < 0.002 && c.impressions > 500);
+    if (/high.*cvr|cvr.*high|best.*convers/i.test(q)) rows = rows.filter(c => c.cvr > 0.10);
+    if (/low.*cvr|cvr.*low/i.test(q))                 rows = rows.filter(c => c.cvr > 0 && c.cvr < 0.05);
+
+    // Sort
+    if (/top|best|revenue|sales/i.test(q))  rows.sort((a,b) => b.sales - a.sales);
+    else if (/spend|cost/i.test(q))         rows.sort((a,b) => b.spend - a.spend);
+    else if (/acos/i.test(q))               rows.sort((a,b) => b.acos - a.acos);
+    else if (/wast|zero/i.test(q))          rows.sort((a,b) => b.spend - a.spend);
+    else if (/ctr/i.test(q))                rows.sort((a,b) => a.ctr - b.ctr);
+    else if (/cvr|convers/i.test(q))        rows.sort((a,b) => b.cvr - a.cvr);
+    else                                     rows.sort((a,b) => b.spend - a.spend);
+
+    const total = rows.length;
+    const shown = rows.slice(0, limit);
+    if (!shown.length) return null;
+
+    // Next steps
+    const nextSteps: string[] = [];
+    const zeroSales = shown.filter(c => c.sales === 0);
+    const highAcos  = shown.filter(c => c.acos > 0.5 && c.sales > 0);
+    const lowCtr    = shown.filter(c => c.ctr < 0.002);
+    const highCvr   = shown.filter(c => c.cvr > 0.15);
+
+    if (zeroSales.length) nextSteps.push(`Pause ${zeroSales.length} zero-sales campaigns — total waste: $${zeroSales.reduce((s,c)=>s+c.spend,0).toFixed(0)}`);
+    if (highAcos.length)  nextSteps.push(`Reduce bids 20-30% in ${highAcos.length} high-ACOS campaigns to improve profitability`);
+    if (lowCtr.length)    nextSteps.push(`Review ad copy and targeting in ${lowCtr.length} low-CTR campaigns`);
+    if (highCvr.length)   nextSteps.push(`Scale budget on ${highCvr.length} high-CVR campaigns — strong converters deserve more spend`);
+    if (!nextSteps.length) nextSteps.push(`Monitor performance weekly — review bids if ACOS drifts above target`);
+
+    return {
+      title: `${shown.length} campaigns${total > limit ? ` (of ${total} matching)` : ""}`,
+      columns: ["#", "Campaign", "Spend", "Sales", "ACOS", "Orders", "Clicks", "CTR", "CVR"],
+      rows: shown.map((c, i) => [i+1, c.name.slice(0,45), fmtR(c.spend), fmtR(c.sales), fmtP(c.acos), fmtN(c.orders), fmtN(c.clicks), fmtP(c.ctr), fmtP(c.cvr)]),
+      csvKeys: ["rank", "campaign", "spend", "sales", "acos", "orders", "clicks", "ctr", "cvr"],
+      nextSteps,
+      count: total,
+    };
+  }
+
+  return null;
 }
 
 export interface AuditResult {
@@ -619,6 +774,7 @@ export function runAuditEngine(data: RawData): AuditResult {
       title: str(col(row, "Product Title")),
       brand: str(col(row, "Brand")),
       orderedRevenue: 0, orderedUnits: 0, pageViews: 0, returnRate: 0, revenuePerView: 0,
+      adSpend: 0, adSales: 0, adOrders: 0, adClicks: 0, acos: 0, cvr: 0, ctr: 0,
     };
     asinAgg[asin].orderedRevenue += num(col(row, "Ordered Revenue"));
     asinAgg[asin].orderedUnits  += num(col(row, "Ordered Units"));
@@ -629,10 +785,34 @@ export function runAuditEngine(data: RawData): AuditResult {
     const asin = str(col(row, "ASIN"));
     if (asinAgg[asin]) asinAgg[asin].pageViews += num(col(row, "Featured Offer Page Views"));
   }
-  const asinTable: AsinRow[] = Object.values(asinAgg).map(a => ({
-    ...a,
-    revenuePerView: a.pageViews > 0 ? a.orderedRevenue / a.pageViews : 0,
-  })).sort((a, b) => b.orderedRevenue - a.orderedRevenue);
+  // ── Cross-reference campaign data into ASIN rows ──
+  // Aggregate ad metrics (spend, sales, orders, clicks) by ASIN from campaign rows
+  const asinAdAgg: Record<string, { spend: number; sales: number; orders: number; clicks: number; impressions: number }> = {};
+  for (const row of campaign) {
+    const asin = str(col(row, "ASIN", "Advertised ASIN"));
+    if (!asin || asin.length < 10) continue;
+    if (!asinAdAgg[asin]) asinAdAgg[asin] = { spend: 0, sales: 0, orders: 0, clicks: 0, impressions: 0 };
+    asinAdAgg[asin].spend       += num(col(row, "Spend"));
+    asinAdAgg[asin].sales       += num(col(row, "Sales"));
+    asinAdAgg[asin].orders      += num(col(row, "Orders"));
+    asinAdAgg[asin].clicks      += num(col(row, "Clicks"));
+    asinAdAgg[asin].impressions += num(col(row, "Impressions"));
+  }
+
+  const asinTable: AsinRow[] = Object.values(asinAgg).map(a => {
+    const ad = asinAdAgg[a.asin] ?? { spend: 0, sales: 0, orders: 0, clicks: 0, impressions: 0 };
+    return {
+      ...a,
+      revenuePerView: a.pageViews > 0 ? a.orderedRevenue / a.pageViews : 0,
+      adSpend:  ad.spend,
+      adSales:  ad.sales,
+      adOrders: ad.orders,
+      adClicks: ad.clicks,
+      acos: ad.sales > 0 ? ad.spend / ad.sales : 0,
+      cvr:  ad.clicks > 0 ? ad.orders / ad.clicks : 0,
+      ctr:  ad.impressions > 0 ? ad.clicks / ad.impressions : 0,
+    };
+  }).sort((a, b) => b.orderedRevenue - a.orderedRevenue);
 
   // ── Assemble result ──
   return {
