@@ -312,8 +312,10 @@ export default function Home() {
     }
 
     // ── Step 2: Try GPT to format the computed answer conversationally ──
+    // Always call the API — server checks for OPENAI_API_KEY env var
+    // Client doesn't need to know the key exists; server handles it
     const key = apiKey || "";
-    if (key || process.env.NEXT_PUBLIC_HAS_KEY) {
+    {
       try {
         const res  = await fetch("/api/chat", {
           method: "POST",
@@ -348,16 +350,24 @@ export default function Home() {
   function formatComputedResponse(gptText: string | null, computed: ComputedAnswer, question: string): string {
     const parts: string[] = [];
 
-    // GPT conversational text OR local headline
     if (gptText) {
+      // GPT conversational response
       parts.push(gptText.replace(/\n/g, "<br>"));
     } else {
-      // Local fallback — use buildLocalResponse for good formatting
-      parts.push(buildLocalResponse(audit!, "smart", question));
-      return parts[0]; // local response already handles everything
+      // No GPT — render computed headline + facts as structured response
+      parts.push(`<strong>${computed.headline}</strong><br>`);
+      if (computed.facts.length) {
+        parts.push(computed.facts.map(f => `• ${f}`).join("<br>"));
+      }
+      if (computed.nextSteps.length) {
+        parts.push(`<div style="margin-top:10px;padding:10px 12px;background:#f0fdf4;border:1px solid #bbf7d0;border-radius:8px">
+          <div style="font-weight:700;color:#166534;margin-bottom:4px">📋 Next Steps</div>
+          ${computed.nextSteps.map((s, i) => `<div style="margin-top:4px;font-size:12px"><strong>${i+1}.</strong> ${s}</div>`).join("")}
+        </div>`);
+      }
     }
 
-    // Computed data table with CSV download
+    // Always render table + CSV if data exists
     if (computed?.data?.rows.length) {
       parts.push(renderComputedTable(computed, question));
     }
