@@ -51,36 +51,60 @@ export function computeAnswer(audit: AuditResult, question: string): ComputedAns
   const q = question.toLowerCase();
   const limit = extractN(q);
 
+  // ── Greetings / meta questions — handle before data routing ──
+  if (/^(hi|hello|hey|what is your name|who are you|what are you|what can you do|help)/i.test(q.trim())) {
+    const { summary, score, scoreLabel, totalWaste } = audit;
+    return {
+      intent: "greeting",
+      headline: `I'm AuditAI — your Amazon advertising analyst`,
+      facts: [
+        `I've analyzed your account: ${summary.campaignCount} campaigns, ${summary.keywordCount} keywords, ${summary.asinCount} ASINs`,
+        `Health score: ${score}/100 (${scoreLabel})`,
+        `Total waste identified: $${totalWaste.toFixed(0)}`,
+        `You can ask me anything about your campaigns, keywords, ASINs, spend, revenue, returns, or get a full action plan`,
+      ],
+      data: null,
+      nextSteps: [
+        `Try: "What should I fix first?"`,
+        `Try: "Show me top 10 keywords wasting budget"`,
+        `Try: "Which campaigns have high ACOS?"`,
+      ],
+      hasData: true,
+    };
+  }
+
   // ── Score every possible intent ──
   const scores = {
     waste:          score(q, [/wast/i, /burn/i, /bleed/i, /zero.?sal/i, /no.?sal/i, /money.*drain/i, /losing/i, /inefficien/i]),
     highAcos:       score(q, [/high.*acos/i, /acos.*high/i, /acos.*above/i, /expensive/i, /overspend/i, /acos/i]),
     lowCvr:         score(q, [/low.*cvr/i, /cvr.*low/i, /poor.*convers/i, /not.*convert/i, /bad.*convers/i]),
-    highCvr:        score(q, [/high.*cvr/i, /cvr.*high/i, /best.*convers/i, /top.*convers/i, /convert.*well/i]),
+    highCvr:        score(q, [/high.*cvr/i, /cvr.*high/i, /best.*convers/i, /top.*convers/i, /convert.*well/i, /converting.?well/i, /best.*performing/i]),
     highReturn:     score(q, [/high.*return/i, /return.*high/i, /return.*rate/i, /refund/i, /sent.*back/i]),
-    campaigns:      score(q, [/campaign/i, /ad.?group/i, /budget/i]),
-    asins:          score(q, [/asin/i, /product/i, /item/i, /sku/i]),
-    keywords:       score(q, [/keyword/i, /search.?term/i, /bid/i, /query/i, /negative/i]),
-    score:          score(q, [/\bscore\b/i, /health/i, /grade/i, /why.*low/i, /improve.*score/i, /dragging/i]),
+    campaigns:      score(q, [/campaign/i, /ad.?group/i]),
+    asins:          score(q, [/\basin\b/i, /\basins\b/i, /product/i, /item/i, /\bsku\b/i]),
+    keywords:       score(q, [/keyword/i, /search.?term/i, /\bbid\b/i, /query/i, /negative/i, /\bkw\b/i, /match.?type/i]),
+    score:          score(q, [/\bscore\b/i, /health/i, /grade/i, /why.*low/i, /improve.*score/i, /dragging/i, /accurate/i]),
     opportunities:  score(q, [/opportunit/i, /grow/i, /scale/i, /upside/i, /potential/i, /increase/i, /expand/i]),
-    revenue:        score(q, [/revenue/i, /sales/i, /earning/i, /income/i, /how.*much.*mak/i]),
-    spend:          score(q, [/spend/i, /cost/i, /cpc/i, /budget/i, /how.*much.*pay/i]),
+    revenue:        score(q, [/revenue/i, /\bsales\b/i, /earning/i, /income/i, /how.*much.*mak/i]),
+    spend:          score(q, [/spend/i, /cost/i, /\bcpc\b/i, /how.*much.*pay/i]),
     returns:        score(q, [/return/i, /refund/i, /sent.*back/i]),
     ctr:            score(q, [/\bctr\b/i, /click.?through/i, /click.?rate/i]),
-    cvr:            score(q, [/\bcvr\b/i, /convers/i, /conversion.?rate/i]),
-    impressions:    score(q, [/impression/i, /visibility/i, /reach/i, /page.?view/i, /traffic/i]),
+    cvr:            score(q, [/\bcvr\b/i, /conversion.?rate/i]),
+    impressions:    score(q, [/impression/i, /visibility/i, /reach/i, /page.?view/i]),
     brands:         score(q, [/brand/i, /carhartt/i, /wonderwink/i]),
-    compare:        score(q, [/compar/i, /vs\b/i, /versus/i, /best.*vs.*worst/i, /differ/i]),
+    compare:        score(q, [/compar/i, /\bvs\b/i, /versus/i, /best.*vs.*worst/i, /differ/i]),
     priority:       score(q, [/first/i, /priority/i, /most.*import/i, /what.*should.*i/i, /where.*start/i, /top.*action/i]),
-    summary:        score(q, [/summary/i, /overview/i, /snapshot/i, /how.*doing/i, /overall/i, /status/i, /\bhello\b/i, /\bhi\b/i, /\bhey\b/i]),
+    summary:        score(q, [/summary/i, /overview/i, /snapshot/i, /how.*doing/i, /overall/i, /status/i]),
     datainfo:       score(q, [/how.*many.*day/i, /date.*range/i, /period/i, /how.*long/i, /uploaded/i, /what.*data/i]),
     powerpoint:     score(q, [/powerpoint/i, /pptx/i, /slide/i, /presentat/i]),
   };
 
-  // ── Complex multi-intent detection ──
-  // Some questions combine intents: "high CVR AND high returns" → both filters applied
-  const isCampaignFocus = scores.campaigns > 0 || (scores.campaigns === 0 && scores.asins === 0 && (scores.highAcos > 0 || scores.waste > 0 || scores.ctr > 0));
-  const isAsinFocus     = scores.asins > 0 || scores.highReturn > 0 || scores.highCvr > 0 || scores.lowCvr > 0 || scores.revenue > 0;
+  // ── Keyword mention always wins over ASIN/campaign routing ──
+  const isKeywordFocus  = scores.keywords > 0;
+  // Campaign focus: explicit campaign mention, NOT overridden by keyword
+  const isCampaignFocus = !isKeywordFocus && (scores.campaigns > 0 || (scores.asins === 0 && (scores.highAcos > 0 || scores.waste > 0 || scores.ctr > 0)));
+  // ASIN focus: explicit ASIN mention, NOT overridden by keyword or campaign
+  const isAsinFocus     = !isKeywordFocus && (scores.asins > 0 || scores.highReturn > 0 || (scores.revenue > 0 && scores.campaigns === 0));
   const isComplexFilter = (scores.highReturn > 0 && scores.highCvr > 0) ||
                           (scores.highAcos > 0 && scores.waste > 0) ||
                           (scores.lowCvr > 0 && scores.highReturn > 0) ||
@@ -90,6 +114,12 @@ export function computeAnswer(audit: AuditResult, question: string): ComputedAns
   // ── PowerPoint ──
   if (scores.powerpoint > 0) {
     return { intent: "powerpoint", headline: "PowerPoint export", facts: [], data: null, nextSteps: [], hasData: false };
+  }
+
+  // ── Keywords always route to keyword handler first ──
+  if (isKeywordFocus) {
+    // Keywords + performance modifier → find top/bottom performing keywords from findings
+    return computeKeywords(audit, limit);
   }
 
   // ── Priority / What should I do first ──
