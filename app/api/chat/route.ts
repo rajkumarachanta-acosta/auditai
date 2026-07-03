@@ -12,22 +12,17 @@ function buildSmartPrompt(computed: ComputedAnswer, question: string): string {
     ? `\nDATA TABLE:\n${computed.data.columns.join(" | ")}\n${computed.data.rows.map(r => r.join(" | ")).join("\n")}`
     : "";
 
-  return `You are an expert Amazon advertising analyst. A user asked:
-"${question}"
+  return `You are an expert Amazon advertising analyst speaking directly to a client.
 
-Here are the pre-computed facts from their account data:
-HEADLINE: ${computed.headline}
+The client asked: "${question}"
+
+Pre-computed facts (use these exact numbers — do not change them):
 ${factsText}${tableText}
 
-RECOMMENDED NEXT STEPS (already computed — enrich the language):
+Next actions to recommend:
 ${stepsText}
 
-Write a conversational, expert response in 4-8 sentences. Rules:
-- Use the exact numbers from the facts above — do NOT change or invent any numbers
-- Sound like a confident analyst talking to a client, not a robot reading a report
-- Reference specific campaign names, ASINs, or metrics from the facts when available
-- End with the next steps, written as clear prioritized actions
-- Keep it concise and actionable — no padding or generic advice`;
+Reply in 3-5 flowing sentences like a real analyst on a call — no bullet points, no headers, no markdown. Just plain conversational text. Start directly with the insight, use the exact numbers, name specific campaigns or ASINs where available, and end with the top 1-2 actions the client should take today.`;
 }
 
 export async function POST(req: NextRequest) {
