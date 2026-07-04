@@ -123,7 +123,9 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "Empty GPT response", source: "fallback" }, { status: 200 });
     }
 
-    return NextResponse.json({ answer, source: "gpt", model: "gpt-4o-mini" });
+    // Return computed alongside GPT prose — the table comes from computed.data,
+    // NOT from GPT. The client renders both: prose on top, table below.
+    return NextResponse.json({ answer, computed, source: "gpt", model: "gpt-4o-mini" });
 
   } catch {
     return NextResponse.json({ error: "Server error" }, { status: 500 });

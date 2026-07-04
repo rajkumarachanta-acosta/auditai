@@ -823,38 +823,50 @@ function computeAsinOverview(audit: AuditResult, limit: number): ComputedAnswer 
 }
 
 function computeKeywords(audit: AuditResult, limit: number): ComputedAnswer {
-  const kwTable   = audit.keywordTable ?? [];
-  const highAcos  = audit.findings.filter(f => f.id.startsWith("kw-acos-")).length;
-  const zeroSales = audit.findings.filter(f => f.id.startsWith("kw-nosales-")).length;
-  const lowCtr    = audit.findings.filter(f => f.id.startsWith("kw-ctr-")).length;
+  const kwTable = audit.keywordTable ?? [];
 
-  // Show actual keyword rows sorted by spend — far more useful than finding bullets
-  const topSpenders = kwTable.slice(0, limit);
+  // ── ONE canonical zero-sales set (spend ≥ $5, sales = 0) used everywhere ──
+  // Never mix this with findings-based counts — they use a different threshold.
   const zeroSaleRows = kwTable.filter(k => k.spend >= 5 && k.sales === 0);
+  const zeroCount    = zeroSaleRows.length;
+  const zeroWaste    = zeroSaleRows.reduce((s, k) => s + k.spend, 0);
+
   const highAcosRows = kwTable.filter(k => k.sales > 0 && k.acos > 0.5);
+  const lowCtrRows   = kwTable.filter(k => k.impressions >= 500 && safeDiv(k.clicks, k.impressions) < 0.002);
   const totalKwSpend = kwTable.reduce((s, k) => s + k.spend, 0);
-  const wastingSpend = zeroSaleRows.reduce((s, k) => s + k.spend, 0);
+
+  // Table: show the zero-sales offenders when that's the question,
+  // otherwise show top spenders. For the general keyword intent, zero-sales first.
+  const tableRows = zeroCount > 0
+    ? zeroSaleRows.slice(0, limit)
+    : kwTable.slice(0, limit);
 
   return {
     intent: "keyword_analysis",
-    headline: `${audit.summary.keywordCount} keywords — ${zeroSales} zero-sales (${f$(wastingSpend)} wasted), ${highAcos} high ACOS`,
+    // headline count = table row count = nextStep count — all use zeroCount
+    headline: `${kwTable.length} keywords tracked — ${zeroCount} zero-sales keywords wasting ${f$(zeroWaste)}`,
     facts: [
-      `Total keywords: ${audit.summary.keywordCount}`,
+      `Total keywords: ${kwTable.length}`,
       `Total keyword spend: ${f$(totalKwSpend)}`,
-      `Zero-sales keywords spending ≥$5: ${zeroSaleRows.length} — ${f$(wastingSpend)} to recover`,
+      // Single sentence with both the count AND the dollar — they belong together
+      `Zero-sales keywords (spend ≥$5, $0 attributed sales): ${zeroCount} keywords wasting ${f$(zeroWaste)}`,
       `High-ACOS keywords (>50%): ${highAcosRows.length}`,
-      `Low-CTR keywords: ${lowCtr}`,
-      topSpenders[0] ? `Top spender: "${topSpenders[0].keyword}" [${topSpenders[0].matchType}] — ${f$(topSpenders[0].spend)} spend, ${f$(topSpenders[0].sales)} sales, ${fp(topSpenders[0].acos)} ACOS` : "",
+      `Low-CTR keywords (CTR <0.20%): ${lowCtrRows.length}`,
+      zeroSaleRows[0] ? `Biggest zero-sales offender: "${zeroSaleRows[0].keyword}" [${zeroSaleRows[0].matchType}] in "${zeroSaleRows[0].campaignName}" — ${f$(zeroSaleRows[0].spend)} wasted` : "",
     ].filter(Boolean),
-    data: topSpenders.length > 0 ? {
-      columns: ["#", "Keyword", "Match", "Spend", "Sales", "ACOS", "CVR", "Orders"],
-      rows: topSpenders.map((k, i) => [i+1, k.keyword.slice(0,35), k.matchType, f$(k.spend), f$(k.sales), fp(k.acos), fp(k.cvr), fn(k.orders)]),
+    data: tableRows.length > 0 ? {
+      columns: ["#", "Keyword", "Match", "Campaign", "Spend", "Sales", "ACOS", "Clicks"],
+      rows: tableRows.map((k, i) => [
+        i + 1, k.keyword.slice(0, 32), k.matchType,
+        k.campaignName.slice(0, 28), f$(k.spend), f$(k.sales), fp(k.acos), fn(k.clicks),
+      ]),
       csvReady: true,
     } : null,
     nextSteps: [
-      zeroSaleRows.length > 0 ? `Pause ${zeroSaleRows.length} zero-sales keywords — recover ${f$(wastingSpend)}` : "",
+      // nextStep count matches headline count — both zeroCount
+      zeroCount > 0       ? `Pause all ${zeroCount} zero-sales keywords — recover ${f$(zeroWaste)}` : "",
       highAcosRows.length > 0 ? `Reduce bids 20-30% on ${highAcosRows.length} high-ACOS keywords` : "",
-      lowCtr > 0              ? `Review ad creative/relevance for ${lowCtr} low-CTR keywords` : "",
+      lowCtrRows.length > 0   ? `Review ad relevance for ${lowCtrRows.length} low-CTR keywords` : "",
     ].filter(Boolean),
     hasData: kwTable.length > 0,
   };

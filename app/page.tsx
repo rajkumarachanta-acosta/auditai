@@ -333,7 +333,12 @@ export default function Home() {
       const data = await res.json();
       if (data.answer) {
         setIsTyping(false);
-        addBotMessage(data.answer.replace(/\n/g, "<br>"));
+        // Prose from GPT on top; table from compute engine below (never from GPT)
+        const computedForTable = data.computed ?? localComputed;
+        const tableHtml = computedForTable?.data?.rows?.length
+          ? renderComputedTable(computedForTable)
+          : "";
+        addBotMessage(data.answer.replace(/\n/g, "<br>") + (tableHtml ? `<br>${tableHtml}` : ""));
         return;
       }
       // Show error in chat so we can debug
