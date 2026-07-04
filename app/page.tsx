@@ -327,6 +327,7 @@ export default function Home() {
           campaignTable: audit.campaignTable.slice(0, 40),
           asinTable: audit.asinTable.slice(0, 40),
           keywordTable: (audit.keywordTable ?? []).slice(0, 60),
+          searchTermTable: (audit.searchTermTable ?? []).slice(0, 60),
           criticalCount: audit.criticalCount,
         } }),
       });
@@ -338,7 +339,12 @@ export default function Home() {
         const tableHtml = computedForTable?.data?.rows?.length
           ? renderComputedTable(computedForTable)
           : "";
-        addBotMessage(data.answer.replace(/\n/g, "<br>") + (tableHtml ? `<br>${tableHtml}` : ""));
+        // Convert GPT markdown bold/italic to HTML, then newlines
+        const prose = data.answer
+          .replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>")
+          .replace(/\*(.+?)\*/g, "<em>$1</em>")
+          .replace(/\n/g, "<br>");
+        addBotMessage(prose + (tableHtml ? `<br>${tableHtml}` : ""));
         return;
       }
       // Show error in chat so we can debug

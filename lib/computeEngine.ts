@@ -12,7 +12,7 @@
 //   "what should I do first to improve my score?"
 // ────────────────────────────────────────────────────────────────────────────
 
-import { AuditResult, AsinRow, CampaignRow, KeywordRow } from "./auditEngine";
+import { AuditResult, AsinRow, CampaignRow, KeywordRow, SearchTermRow } from "./auditEngine";
 
 // ── What the compute engine returns ──
 export interface ComputedAnswer {
@@ -87,6 +87,7 @@ export function computeAnswer(audit: AuditResult, question: string): ComputedAns
 
   // ── Score every possible intent ──
   const scores = {
+    searchTerms:    score(q, [/search.?term/i, /customer.?quer/i, /actual.?quer/i, /search.?quer/i, /what.*customer.*search/i, /customer.*search/i]),
     zeroConversion: score(q, [/(zero|no|not?)\s*(convers|order|sale|purchas)/i, /spend.*(no|without|never).*(sale|order|convers)/i, /paying.*nothing/i, /dead.*spend/i, /ad.*spend.*no.*order/i, /no.*order.*ad/i, /burn.*no.*conver/i]),
     waste:          score(q, [/wast/i, /burn/i, /bleed/i, /zero.?sal/i, /no.?sal/i, /money.*drain/i, /losing/i, /inefficien/i]),
     highAcos:       score(q, [/high.*acos/i, /acos.*high/i, /acos.*above/i, /expensive/i, /overspend/i, /acos/i]),
@@ -95,7 +96,7 @@ export function computeAnswer(audit: AuditResult, question: string): ComputedAns
     highReturn:     score(q, [/high.*return/i, /return.*high/i, /return.*rate/i, /refund/i, /sent.*back/i]),
     campaigns:      score(q, [/campaign/i, /ad.?group/i]),
     asins:          score(q, [/\basin\b/i, /\basins\b/i, /product/i, /item/i, /\bsku\b/i]),
-    keywords:       score(q, [/keyword/i, /search.?term/i, /\bbid\b/i, /query/i, /negative/i, /\bkw\b/i, /match.?type/i]),
+    keywords:       score(q, [/keyword/i, /\bbid\b/i, /\bkw\b/i, /match.?type/i]),
     score:          score(q, [/\bscore\b/i, /health/i, /grade/i, /why.*low/i, /improve.*score/i, /dragging/i, /accurate/i]),
     opportunities:  score(q, [/opportunit/i, /grow/i, /scale/i, /upside/i, /potential/i, /increase/i, /expand/i]),
     revenue:        score(q, [/revenue/i, /\bsales\b/i, /earning/i, /income/i, /how.*much.*mak/i]),
@@ -112,35 +113,40 @@ export function computeAnswer(audit: AuditResult, question: string): ComputedAns
     powerpoint:     score(q, [/powerpoint/i, /pptx/i, /slide/i, /presentat/i]),
   };
 
-  // ── Keyword mention always wins over ASIN/campaign routing ──
-  const isKeywordFocus  = scores.keywords > 0;
-  // Campaign focus: explicit campaign mention, NOT overridden by keyword
-  const isCampaignFocus = !isKeywordFocus && (scores.campaigns > 0 || (scores.asins === 0 && (scores.highAcos > 0 || scores.waste > 0 || scores.ctr > 0)));
+  // ── Search terms beat keywords (different data source) ──
+  const isSearchTermFocus = scores.searchTerms > 0;
+  // Keyword: only when search term NOT mentioned
+  const isKeywordFocus  = !isSearchTermFocus && scores.keywords > 0;
+  // Campaign focus: explicit campaign mention, NOT overridden by keyword or search term
+  const isCampaignFocus = !isSearchTermFocus && !isKeywordFocus && (scores.campaigns > 0 || (scores.asins === 0 && (scores.highAcos > 0 || scores.waste > 0 || scores.ctr > 0)));
   // ASIN focus: explicit ASIN mention, NOT overridden by keyword or campaign
-  const isAsinFocus     = !isKeywordFocus && (scores.asins > 0 || scores.highReturn > 0 || (scores.revenue > 0 && scores.campaigns === 0));
+  const isAsinFocus     = !isKeywordFocus && !isSearchTermFocus && (scores.asins > 0 || scores.highReturn > 0 || (scores.revenue > 0 && scores.campaigns === 0));
   // Complex = two filters at once (mutually compatible ones only — fixes B3)
   const isComplexFilter = (scores.highReturn > 0 && scores.highCvr > 0) ||
                           (scores.highAcos > 0 && scores.lowCvr > 0) ||
                           (scores.lowCvr > 0 && scores.highReturn > 0) ||
                           (scores.waste > 0 && scores.campaigns > 0);
-  // Note: (highAcos + waste) removed — contradictory; waste alone is the right intent
 
   // ── PowerPoint ──
   if (scores.powerpoint > 0) {
     return { intent: "powerpoint", headline: "PowerPoint export", facts: [], data: null, nextSteps: [], hasData: false };
   }
 
-  // ── Zero conversion — highest-specificity intent (fixes the screenshot bug) ──
-  // "ASINs with ad spend and no conversions" must NEVER fall through to GPT
-  if (scores.zeroConversion > 0) {
-    if (isKeywordFocus) return computeZeroConversionKeywords(audit, limit);
-    if (isCampaignFocus) return computeZeroConversionCampaigns(audit, limit);
-    return computeZeroConversionAsins(audit, limit); // default: ASIN level
+  // ── Search terms — highest specificity ──
+  if (isSearchTermFocus) {
+    return computeSearchTerms(audit, q, limit);
   }
 
-  // ── Keywords always route to keyword handler first ──
+  // ── Zero conversion ──
+  if (scores.zeroConversion > 0) {
+    if (isKeywordFocus) return computeZeroConversionKeywords(audit, q, limit);
+    if (isCampaignFocus) return computeZeroConversionCampaigns(audit, limit);
+    return computeZeroConversionAsins(audit, limit);
+  }
+
+  // ── Keywords ──
   if (isKeywordFocus) {
-    return computeKeywords(audit, limit);
+    return computeKeywords(audit, q, limit);
   }
 
   // ── Priority / What should I do first ──
@@ -164,6 +170,7 @@ export function computeAnswer(audit: AuditResult, question: string): ComputedAns
   if (topIntent[1] === 0) return computeSummary(audit); // nothing matched → summary
 
   switch (topIntent[0]) {
+    case "searchTerms":   return computeSearchTerms(audit, q, limit);
     case "zeroConversion": return computeZeroConversionAsins(audit, limit);
     case "waste":         return isCampaignFocus ? computeWasteCampaigns(audit, limit) : computeWasteOverall(audit);
     case "highAcos":      return isCampaignFocus ? computeHighAcosCampaigns(audit, limit) : computeHighAcosAsins(audit, limit);
@@ -172,7 +179,7 @@ export function computeAnswer(audit: AuditResult, question: string): ComputedAns
     case "highReturn":    return computeHighReturnAsins(audit, limit);
     case "campaigns":     return computeCampaignOverview(audit, limit);
     case "asins":         return computeAsinOverview(audit, limit);
-    case "keywords":      return computeKeywords(audit, limit);
+    case "keywords":      return computeKeywords(audit, q, limit);
     case "score":         return computeScoreAnalysis(audit);
     case "opportunities": return computeOpportunities(audit, limit);
     case "revenue":       return computeRevenue(audit);
@@ -635,12 +642,15 @@ function computeZeroConversionCampaigns(audit: AuditResult, limit: number): Comp
 }
 
 // ── Zero Conversion: Keywords with spend and zero sales ──────────────────────
-function computeZeroConversionKeywords(audit: AuditResult, limit: number): ComputedAnswer {
+function computeZeroConversionKeywords(audit: AuditResult, q: string, limit: number): ComputedAnswer {
   const kwTable = audit.keywordTable ?? [];
+  const enabledOnly = /enabled|active|running|live/i.test(q);
   const rows = kwTable
     .filter(k => k.spend >= 5 && k.sales === 0)
+    .filter(k => !enabledOnly || k.state === "enabled")
     .sort((a, b) => b.spend - a.spend)
     .slice(0, limit);
+  const stateNote = enabledOnly ? " (enabled keywords only)" : "";
 
   const totalSpend  = rows.reduce((s, k) => s + k.spend, 0);
   const totalClicks = rows.reduce((s, k) => s + k.clicks, 0);
@@ -648,8 +658,8 @@ function computeZeroConversionKeywords(audit: AuditResult, limit: number): Compu
   return {
     intent: "zero_conversion_keywords",
     headline: rows.length > 0
-      ? `${rows.length} keywords burning ${f$(totalSpend)} with zero sales`
-      : "No keywords found spending ≥$5 with zero sales",
+      ? `${rows.length} keywords burning ${f$(totalSpend)} with zero sales${stateNote}`
+      : `No keywords found spending ≥$5 with zero sales${stateNote}`,
     facts: [
       `${rows.length} keywords have ≥$5 spend and zero attributed sales`,
       `Total spend to recover: ${f$(totalSpend)}`,
@@ -822,31 +832,31 @@ function computeAsinOverview(audit: AuditResult, limit: number): ComputedAnswer 
   };
 }
 
-function computeKeywords(audit: AuditResult, limit: number): ComputedAnswer {
+function computeKeywords(audit: AuditResult, q: string, limit: number): ComputedAnswer {
   const kwTable = audit.keywordTable ?? [];
+  const enabledOnly = /enabled|active|running|live/i.test(q);
+  const filteredTable = enabledOnly ? kwTable.filter(k => k.state === "enabled") : kwTable;
+  const stateNote = enabledOnly ? " (enabled only)" : "";
 
   // ── ONE canonical zero-sales set (spend ≥ $5, sales = 0) used everywhere ──
-  // Never mix this with findings-based counts — they use a different threshold.
-  const zeroSaleRows = kwTable.filter(k => k.spend >= 5 && k.sales === 0);
+  const zeroSaleRows = filteredTable.filter(k => k.spend >= 5 && k.sales === 0);
   const zeroCount    = zeroSaleRows.length;
   const zeroWaste    = zeroSaleRows.reduce((s, k) => s + k.spend, 0);
 
-  const highAcosRows = kwTable.filter(k => k.sales > 0 && k.acos > 0.5);
-  const lowCtrRows   = kwTable.filter(k => k.impressions >= 500 && safeDiv(k.clicks, k.impressions) < 0.002);
-  const totalKwSpend = kwTable.reduce((s, k) => s + k.spend, 0);
+  const highAcosRows = filteredTable.filter(k => k.sales > 0 && k.acos > 0.5);
+  const lowCtrRows   = filteredTable.filter(k => k.impressions >= 500 && safeDiv(k.clicks, k.impressions) < 0.002);
+  const totalKwSpend = filteredTable.reduce((s, k) => s + k.spend, 0);
 
-  // Table: show the zero-sales offenders when that's the question,
-  // otherwise show top spenders. For the general keyword intent, zero-sales first.
+  // Table: show zero-sales rows; fall back to top spenders if none
   const tableRows = zeroCount > 0
     ? zeroSaleRows.slice(0, limit)
-    : kwTable.slice(0, limit);
+    : filteredTable.slice(0, limit);
 
   return {
     intent: "keyword_analysis",
-    // headline count = table row count = nextStep count — all use zeroCount
-    headline: `${kwTable.length} keywords tracked — ${zeroCount} zero-sales keywords wasting ${f$(zeroWaste)}`,
+    headline: `${filteredTable.length} keywords${stateNote} — ${zeroCount} zero-sales wasting ${f$(zeroWaste)}`,
     facts: [
-      `Total keywords: ${kwTable.length}`,
+      `Total keywords${stateNote}: ${filteredTable.length}`,
       `Total keyword spend: ${f$(totalKwSpend)}`,
       // Single sentence with both the count AND the dollar — they belong together
       `Zero-sales keywords (spend ≥$5, $0 attributed sales): ${zeroCount} keywords wasting ${f$(zeroWaste)}`,
@@ -868,7 +878,82 @@ function computeKeywords(audit: AuditResult, limit: number): ComputedAnswer {
       highAcosRows.length > 0 ? `Reduce bids 20-30% on ${highAcosRows.length} high-ACOS keywords` : "",
       lowCtrRows.length > 0   ? `Review ad relevance for ${lowCtrRows.length} low-CTR keywords` : "",
     ].filter(Boolean),
-    hasData: kwTable.length > 0,
+    hasData: filteredTable.length > 0,
+  };
+}
+
+// ── Search Terms — actual customer queries (NOT keywords) ────────────────────
+// This is what the customer actually typed. Separate from keywordTable.
+function computeSearchTerms(audit: AuditResult, q: string, limit: number): ComputedAnswer {
+  const stTable = audit.searchTermTable ?? [];
+  if (stTable.length === 0) {
+    return {
+      intent: "search_terms",
+      headline: "No Search Term report uploaded",
+      facts: [
+        "The Search Term report (from your Bulk file) was not found in the uploaded data.",
+        "Upload a bulk file that includes the SP Search Term Report sheet to get search term analysis.",
+      ],
+      data: null,
+      nextSteps: ["Re-download your Amazon Bulk file and include the Search Term sheet"],
+      hasData: false,
+    };
+  }
+
+  // Filter by intent: zero-sales, high-converting, or general (default: zero-sales wasters)
+  const wantZeroSales    = /zero|no.*sale|no.*conver|wast|burn/i.test(q);
+  const wantHighConverting = /high.*conver|winning|harvest|promot|add.*keyword/i.test(q);
+
+  let tableRows: typeof stTable;
+  let intent = "search_terms";
+  let headline = "";
+
+  if (wantHighConverting) {
+    tableRows = stTable.filter(s => s.orders > 0 && s.cvr > 0.1).sort((a, b) => b.cvr - a.cvr).slice(0, limit);
+    intent = "search_term_harvest";
+    headline = `${tableRows.length} high-converting search terms to promote to keywords`;
+  } else {
+    // Default: zero-sales wasters sorted by spend
+    tableRows = stTable.filter(s => s.spend >= 5 && s.sales === 0).sort((a, b) => b.spend - a.spend).slice(0, limit);
+    intent = "search_term_waste";
+    const totalWaste = tableRows.reduce((s, r) => s + r.spend, 0);
+    headline = tableRows.length > 0
+      ? `${tableRows.length} search terms wasting ${f$(totalWaste)} with zero attributed sales`
+      : "No zero-sales search terms found with spend ≥$5";
+  }
+
+  const totalSpend  = tableRows.reduce((s, r) => s + r.spend, 0);
+  const totalClicks = tableRows.reduce((s, r) => s + r.clicks, 0);
+  const allZeroWaste = stTable.filter(s => s.spend >= 5 && s.sales === 0).reduce((s, r) => s + r.spend, 0);
+  const allZeroCount = stTable.filter(s => s.spend >= 5 && s.sales === 0).length;
+
+  return {
+    intent,
+    headline,
+    facts: [
+      `Total search terms in report: ${stTable.length}`,
+      `Zero-sales search terms (spend ≥$5): ${allZeroCount} — ${f$(allZeroWaste)} wasted`,
+      `Showing top ${tableRows.length} by ${wantHighConverting ? "conversion rate" : "wasted spend"}`,
+      tableRows[0] ? `Top result: "${tableRows[0].searchTerm}" — ${f$(tableRows[0].spend)} spend, ${tableRows[0].orders} orders` : "",
+      tableRows[1] ? `Second: "${tableRows[1].searchTerm}" — ${f$(tableRows[1].spend)} spend` : "",
+    ].filter(Boolean),
+    data: tableRows.length > 0 ? {
+      columns: ["#", "Search Term", "Match", "Campaign", "Spend", "Sales", "ACOS", "Clicks"],
+      rows: tableRows.map((s, i) => [
+        i + 1, s.searchTerm.slice(0, 35), s.matchType,
+        s.campaignName.slice(0, 28), f$(s.spend), f$(s.sales), fp(s.acos), fn(s.clicks),
+      ]),
+      csvReady: true,
+    } : null,
+    nextSteps: wantHighConverting ? [
+      `Add top ${Math.min(5, tableRows.length)} converting search terms as exact-match keywords`,
+      `Increase bids on campaigns where these terms trigger`,
+    ] : [
+      allZeroCount > 0 ? `Add ${allZeroCount} zero-sales search terms as negative exact keywords` : "",
+      `Review campaigns triggering irrelevant terms — tighten match types`,
+      `Set up a weekly search term harvest cadence`,
+    ].filter(Boolean),
+    hasData: tableRows.length > 0,
   };
 }
 

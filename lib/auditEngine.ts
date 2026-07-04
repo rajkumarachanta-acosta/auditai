@@ -42,6 +42,7 @@ export interface KeywordRow {
   matchType: string
   campaignName: string
   adGroupName: string
+  state: string       // "enabled" | "paused" | "archived"
   spend: number
   sales: number
   acos: number
@@ -49,6 +50,21 @@ export interface KeywordRow {
   impressions: number
   orders: number
   ctr: number
+  cvr: number
+}
+
+// Pre-aggregated row for per-search-term table
+export interface SearchTermRow {
+  searchTerm: string
+  matchedKeyword: string
+  matchType: string
+  campaignName: string
+  adGroupName: string
+  spend: number
+  sales: number
+  acos: number
+  clicks: number
+  orders: number
   cvr: number
 }
 
@@ -238,6 +254,7 @@ export interface AuditResult {
   campaignTable: CampaignRow[];
   asinTable: AsinRow[];
   keywordTable: KeywordRow[];
+  searchTermTable: SearchTermRow[];
   periodLabel: string;          // e.g. "Period A" or "Last 30 days"
 }
 
@@ -831,7 +848,7 @@ export function runAuditEngine(data: RawData): AuditResult {
     };
   }).sort((a, b) => b.orderedRevenue - a.orderedRevenue);
 
-  // ── Build per-keyword table ──
+  // ── Build per-keyword table (includes state for enabled/paused filtering) ──
   const keywordTable: KeywordRow[] = kwRows.map(row => {
     const impr   = num(col(row, "Impressions"));
     const clicks = num(col(row, "Clicks"));
@@ -843,6 +860,7 @@ export function runAuditEngine(data: RawData): AuditResult {
       matchType:    str(col(row, "Match Type")),
       campaignName: str(col(row, "_ResolvedCampaignName", "Campaign Name (Informational only)", "Campaign Name")),
       adGroupName:  str(col(row, "Ad Group Name (Informational only)", "Ad Group Name")),
+      state:        str(col(row, "State")).toLowerCase() || "enabled",
       spend,
       sales,
       acos:  sales  > 0 ? spend  / sales  : 0,
@@ -853,6 +871,30 @@ export function runAuditEngine(data: RawData): AuditResult {
       cvr:  clicks > 0 ? orders / clicks : 0,
     };
   }).sort((a, b) => b.spend - a.spend);
+
+  // ── Build search term table (actual customer queries from Search Term report) ──
+  const searchTermTable: SearchTermRow[] = searchTerm.map(row => {
+    const spend  = num(col(row, "Spend"));
+    const sales  = num(col(row, "Sales", "Attributed Sales 14d"));
+    const clicks = num(col(row, "Clicks"));
+    const orders = num(col(row, "Orders", "Attributed Conversions 14d"));
+    const term   = str(col(row, "Customer Search Term", "Search Term", "Query"));
+    if (!term || term === "Customer Search Term") return null;
+    return {
+      searchTerm:     term,
+      matchedKeyword: str(col(row, "Keyword Text", "Matched Keyword")),
+      matchType:      str(col(row, "Match Type")),
+      campaignName:   str(col(row, "_ResolvedCampaignName", "Campaign Name (Informational only)", "Campaign Name")),
+      adGroupName:    str(col(row, "Ad Group Name (Informational only)", "Ad Group Name")),
+      spend,
+      sales,
+      acos:  sales  > 0 ? spend / sales  : 0,
+      clicks,
+      orders,
+      cvr:   clicks > 0 ? orders / clicks : 0,
+    };
+  }).filter((r): r is SearchTermRow => r !== null)
+    .sort((a, b) => b.spend - a.spend);
 
   // ── Assemble result ──
   return {
@@ -873,6 +915,7 @@ export function runAuditEngine(data: RawData): AuditResult {
     campaignTable,
     asinTable,
     keywordTable,
+    searchTermTable,
     periodLabel: "Current Period",
   };
 }
