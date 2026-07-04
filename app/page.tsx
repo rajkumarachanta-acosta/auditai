@@ -284,11 +284,11 @@ export default function Home() {
     setInput("");
     setIsTyping(true);
 
-    // ── Step 1: Always compute locally first (zero tokens, instant) ──
-    const computed = computeAnswer(audit, text);
+    // ── Step 1: Compute locally for PowerPoint/compare detection ──
+    const localComputed = computeAnswer(audit, text);
 
     // PowerPoint
-    if (computed.intent === "powerpoint") {
+    if (localComputed.intent === "powerpoint") {
       setIsTyping(false);
       addBotMessage(
         `Preparing your presentation — <strong>8 slides</strong> from your data:<br><br>` +
@@ -311,79 +311,51 @@ export default function Home() {
       return;
     }
 
-    // ── Step 2: Try GPT to format the computed answer conversationally ──
-    // Always call the API — server checks for OPENAI_API_KEY env var
-    // Client doesn't need to know the key exists; server handles it
-    const key = apiKey || "";
-    {
-      try {
-        // Strip heavy table data before sending — server only needs
-        // summary + findings + cohorts, not all 100k rows
-        const auditPayload = {
-          ...audit,
-          campaignTable: audit.campaignTable.slice(0, 50),
-          asinTable:     audit.asinTable.slice(0, 50),
-        };
-        const res  = await fetch("/api/chat", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ question: text, audit: auditPayload, apiKey: key }),
-        });
-        const data = await res.json();
+    // ── Step 2: Call GPT — it answers everything conversationally ──
+    try {
+      const auditPayload = {
+        ...audit,
+        campaignTable: audit.campaignTable.slice(0, 60),
+        asinTable:     audit.asinTable.slice(0, 60),
+      };
+      const res  = await fetch("/api/chat", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ question: text, audit: auditPayload, apiKey }),
+      });
+      const data = await res.json();
+      if (data.answer) {
+        setIsTyping(false);
+        addBotMessage(data.answer.replace(/\n/g, "<br>"));
+        return;
+      }
+    } catch { /* fall through to local */ }
 
-        if (data.answer) {
-          setIsTyping(false);
-          // GPT answer + computed table + CSV if available
-          addBotMessage(formatComputedResponse(data.answer, data.computed ?? computed, text));
-          return;
-        }
-        // No API key or error — fall through to local
-        if (data.computed) {
-          await new Promise(r => setTimeout(r, 400));
-          setIsTyping(false);
-          addBotMessage(formatComputedResponse(null, data.computed, text));
-          return;
-        }
-      } catch { /* fall through to local */ }
-    }
-
-    // ── Step 3: Local computed response (no API key needed) ──
+    // ── Step 3: Local computed fallback (no API key) ──
     await new Promise(r => setTimeout(r, 400));
     setIsTyping(false);
-    addBotMessage(formatComputedResponse(null, computed, text));
+    const fallback = computeAnswer(audit, text);
+    addBotMessage(renderLocalComputed(fallback));
   }
 
-  // ── Format a computed answer into HTML — text + table + next steps + CSV ──
-  function formatComputedResponse(gptText: string | null, computed: ComputedAnswer, question: string): string {
+  // ── Local fallback renderer ──
+  function renderLocalComputed(computed: ComputedAnswer): string {
     const parts: string[] = [];
-
-    if (gptText) {
-      // GPT conversational response
-      parts.push(gptText.replace(/\n/g, "<br>"));
-    } else {
-      // No GPT — render computed headline + facts as structured response
-      parts.push(`<strong>${computed.headline}</strong><br>`);
-      if (computed.facts.length) {
-        parts.push(computed.facts.map(f => `• ${f}`).join("<br>"));
-      }
-      if (computed.nextSteps.length) {
-        parts.push(`<div style="margin-top:10px;padding:10px 12px;background:#f0fdf4;border:1px solid #bbf7d0;border-radius:8px">
-          <div style="font-weight:700;color:#166534;margin-bottom:4px">📋 Next Steps</div>
-          ${computed.nextSteps.map((s, i) => `<div style="margin-top:4px;font-size:12px"><strong>${i+1}.</strong> ${s}</div>`).join("")}
-        </div>`);
-      }
+    parts.push(`<strong>${computed.headline}</strong>`);
+    if (computed.facts.length) parts.push(computed.facts.map(f => `• ${f}`).join("<br>"));
+    if (computed.nextSteps.length) {
+      parts.push(`<div style="margin-top:10px;padding:10px 12px;background:#f0fdf4;border:1px solid #bbf7d0;border-radius:8px">
+        <div style="font-weight:700;color:#166534;margin-bottom:4px">📋 Next Steps</div>
+        ${computed.nextSteps.map((s, i) => `<div style="margin-top:4px;font-size:12px"><strong>${i+1}.</strong> ${s}</div>`).join("")}
+      </div>`);
     }
-
-    // Always render table + CSV if data exists
-    if (computed?.data?.rows.length) {
-      parts.push(renderComputedTable(computed, question));
-    }
-
+    if (computed.data?.rows.length) parts.push(renderComputedTable(computed));
     return parts.join("<br>");
   }
 
   // ── Render computed table as HTML + CSV download button ──
-  function renderComputedTable(computed: ComputedAnswer, question: string): string {
+  function renderComputedTable(computed: ComputedAnswer): string {
+    const question = computed.intent;
     if (!computed.data) return "";
     const { columns, rows } = computed.data;
 
