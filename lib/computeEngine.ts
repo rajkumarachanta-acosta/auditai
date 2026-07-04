@@ -12,7 +12,7 @@
 //   "what should I do first to improve my score?"
 // ────────────────────────────────────────────────────────────────────────────
 
-import { AuditResult, AsinRow, CampaignRow } from "./auditEngine";
+import { AuditResult, AsinRow, CampaignRow, KeywordRow } from "./auditEngine";
 
 // ── What the compute engine returns ──
 export interface ComputedAnswer {
@@ -30,18 +30,30 @@ export interface DataTable {
   csvReady: boolean;
 }
 
-// ── Formatters ──
-const f$ = (n: number) => n >= 1_000_000 ? `$${(n/1_000_000).toFixed(2)}M` : n >= 1_000 ? `$${(n/1_000).toFixed(1)}K` : `$${n.toFixed(2)}`;
-const fp = (n: number) => `${(n * 100).toFixed(2)}%`;
-const fn = (n: number) => n.toLocaleString();
+// ── Safe division — never produces NaN/Infinity (fixes B1) ──
+const safeDiv = (a: number, b: number, fallback = 0): number =>
+  b > 0 && Number.isFinite(a) && Number.isFinite(b) ? a / b : fallback;
 
-// ── Extract "top N" from question ──
+// ── NaN-proof formatters (fixes B1) ──
+const f$ = (n: number): string => {
+  if (!Number.isFinite(n)) return "$0";
+  const abs = Math.abs(n);
+  return abs >= 1_000_000 ? `$${(n/1_000_000).toFixed(2)}M`
+       : abs >= 1_000     ? `$${(n/1_000).toFixed(1)}K`
+       : `$${n.toFixed(2)}`;
+};
+const fp = (n: number): string => Number.isFinite(n) ? `${(n * 100).toFixed(2)}%` : "0.00%";
+const fn = (n: number): string => Number.isFinite(n) ? Math.round(n).toLocaleString() : "0";
+
+// ── Extract "top N" — only when a ranking word is present (fixes B8) ──
 function extractN(q: string, def = 10): number {
-  const m = q.match(/\b(top|bottom|worst|best)?\s*(\d+)\b/i);
-  return m ? Math.min(parseInt(m[2]), 100) : def;
+  const m = q.match(/\b(?:top|bottom|worst|best|first|show|list|give\s+me)\s+(\d{1,3})\b/i);
+  if (m) return Math.min(parseInt(m[1], 10), 100);
+  const m2 = q.match(/\b(?:top|bottom|worst|best)\s*(\d{1,3})\b/i);
+  return m2 ? Math.min(parseInt(m2[1], 10), 100) : def;
 }
 
-// ── Signal scoring — how strongly does question match a topic ──
+// ── Signal scoring ──
 function score(q: string, patterns: RegExp[]): number {
   return patterns.reduce((s, p) => s + (p.test(q) ? 1 : 0), 0);
 }
@@ -75,6 +87,7 @@ export function computeAnswer(audit: AuditResult, question: string): ComputedAns
 
   // ── Score every possible intent ──
   const scores = {
+    zeroConversion: score(q, [/(zero|no|not?)\s*(convers|order|sale|purchas)/i, /spend.*(no|without|never).*(sale|order|convers)/i, /paying.*nothing/i, /dead.*spend/i, /ad.*spend.*no.*order/i, /no.*order.*ad/i, /burn.*no.*conver/i]),
     waste:          score(q, [/wast/i, /burn/i, /bleed/i, /zero.?sal/i, /no.?sal/i, /money.*drain/i, /losing/i, /inefficien/i]),
     highAcos:       score(q, [/high.*acos/i, /acos.*high/i, /acos.*above/i, /expensive/i, /overspend/i, /acos/i]),
     lowCvr:         score(q, [/low.*cvr/i, /cvr.*low/i, /poor.*convers/i, /not.*convert/i, /bad.*convers/i]),
@@ -91,7 +104,7 @@ export function computeAnswer(audit: AuditResult, question: string): ComputedAns
     ctr:            score(q, [/\bctr\b/i, /click.?through/i, /click.?rate/i]),
     cvr:            score(q, [/\bcvr\b/i, /conversion.?rate/i]),
     impressions:    score(q, [/impression/i, /visibility/i, /reach/i, /page.?view/i]),
-    brands:         score(q, [/brand/i, /carhartt/i, /wonderwink/i]),
+    brands:         score(q, [/brand/i]),
     compare:        score(q, [/compar/i, /\bvs\b/i, /versus/i, /best.*vs.*worst/i, /differ/i]),
     priority:       score(q, [/first/i, /priority/i, /most.*import/i, /what.*should.*i/i, /where.*start/i, /top.*action/i]),
     summary:        score(q, [/summary/i, /overview/i, /snapshot/i, /how.*doing/i, /overall/i, /status/i]),
@@ -105,20 +118,28 @@ export function computeAnswer(audit: AuditResult, question: string): ComputedAns
   const isCampaignFocus = !isKeywordFocus && (scores.campaigns > 0 || (scores.asins === 0 && (scores.highAcos > 0 || scores.waste > 0 || scores.ctr > 0)));
   // ASIN focus: explicit ASIN mention, NOT overridden by keyword or campaign
   const isAsinFocus     = !isKeywordFocus && (scores.asins > 0 || scores.highReturn > 0 || (scores.revenue > 0 && scores.campaigns === 0));
+  // Complex = two filters at once (mutually compatible ones only — fixes B3)
   const isComplexFilter = (scores.highReturn > 0 && scores.highCvr > 0) ||
-                          (scores.highAcos > 0 && scores.waste > 0) ||
-                          (scores.lowCvr > 0 && scores.highReturn > 0) ||
                           (scores.highAcos > 0 && scores.lowCvr > 0) ||
+                          (scores.lowCvr > 0 && scores.highReturn > 0) ||
                           (scores.waste > 0 && scores.campaigns > 0);
+  // Note: (highAcos + waste) removed — contradictory; waste alone is the right intent
 
   // ── PowerPoint ──
   if (scores.powerpoint > 0) {
     return { intent: "powerpoint", headline: "PowerPoint export", facts: [], data: null, nextSteps: [], hasData: false };
   }
 
+  // ── Zero conversion — highest-specificity intent (fixes the screenshot bug) ──
+  // "ASINs with ad spend and no conversions" must NEVER fall through to GPT
+  if (scores.zeroConversion > 0) {
+    if (isKeywordFocus) return computeZeroConversionKeywords(audit, limit);
+    if (isCampaignFocus) return computeZeroConversionCampaigns(audit, limit);
+    return computeZeroConversionAsins(audit, limit); // default: ASIN level
+  }
+
   // ── Keywords always route to keyword handler first ──
   if (isKeywordFocus) {
-    // Keywords + performance modifier → find top/bottom performing keywords from findings
     return computeKeywords(audit, limit);
   }
 
@@ -143,6 +164,7 @@ export function computeAnswer(audit: AuditResult, question: string): ComputedAns
   if (topIntent[1] === 0) return computeSummary(audit); // nothing matched → summary
 
   switch (topIntent[0]) {
+    case "zeroConversion": return computeZeroConversionAsins(audit, limit);
     case "waste":         return isCampaignFocus ? computeWasteCampaigns(audit, limit) : computeWasteOverall(audit);
     case "highAcos":      return isCampaignFocus ? computeHighAcosCampaigns(audit, limit) : computeHighAcosAsins(audit, limit);
     case "lowCvr":        return isCampaignFocus ? computeLowCvrCampaigns(audit, limit) : computeLowCvrAsins(audit, limit);
@@ -482,8 +504,11 @@ function computeComplexCampaignQuery(audit: AuditResult, q: string, limit: numbe
   let rows = [...audit.campaignTable];
   const appliedFilters: string[] = [];
 
-  if (s.waste > 0 || (s.highAcos === 0 && s.waste > 0)) {
-    rows = rows.filter(c => c.sales === 0 && c.spend > 0);
+  // B2 fix: the old right-hand side (s.highAcos === 0 && s.waste > 0) was always
+  // false when the left was false — dead code. Now: waste and highAcos are separate
+  // filters that each independently narrow the result set.
+  if (s.waste > 0) {
+    rows = rows.filter(c => c.spend > 0 && c.sales === 0);
     appliedFilters.push("zero sales");
   }
   if (s.highAcos > 0) {
@@ -524,6 +549,125 @@ function computeComplexCampaignQuery(audit: AuditResult, q: string, limit: numbe
     } : null,
     nextSteps,
     hasData: shown.length > 0,
+  };
+}
+
+// ── Zero Conversion: ASINs with ad spend but zero orders ────────────────────
+// This is the FIX for the screenshot bug — deterministic, exact, never hallucinated
+function computeZeroConversionAsins(audit: AuditResult, limit: number): ComputedAnswer {
+  const MIN_SPEND = 5; // ignore noise under $5
+  const rows = audit.asinTable
+    .filter(a => a.adSpend >= MIN_SPEND && a.adOrders === 0)
+    .sort((a, b) => b.adSpend - a.adSpend)
+    .slice(0, limit);
+
+  const totalSpend   = rows.reduce((s, a) => s + a.adSpend, 0);
+  const totalClicks  = rows.reduce((s, a) => s + a.adClicks, 0);
+  const costPerClick = safeDiv(totalSpend, totalClicks);
+
+  return {
+    intent: "zero_conversion_asins",
+    headline: rows.length > 0
+      ? `${rows.length} ASINs burning ${f$(totalSpend)} in ad spend with zero orders`
+      : "No ASINs found with ad spend and zero orders — good sign",
+    facts: [
+      `${rows.length} ASINs have ad spend ≥ $5 and zero ad orders`,
+      `Total ad spend wasted: ${f$(totalSpend)}`,
+      `Total clicks that never converted: ${fn(totalClicks)}`,
+      costPerClick > 0 ? `Average wasted CPC: ${f$(costPerClick)}` : "",
+      rows[0] ? `Biggest offender: ${rows[0].asin} "${rows[0].title.slice(0,40)}" — ${f$(rows[0].adSpend)} spend, ${fn(rows[0].adClicks)} clicks, $0 orders` : "",
+      rows[1] ? `Second: ${rows[1].asin} "${rows[1].title.slice(0,40)}" — ${f$(rows[1].adSpend)} spend` : "",
+    ].filter(Boolean),
+    data: rows.length > 0 ? {
+      columns: ["#", "ASIN", "Product", "Ad Spend", "Clicks", "Orders", "Revenue", "Return %"],
+      rows: rows.map((a, i) => [
+        i + 1, a.asin, a.title.slice(0, 38),
+        f$(a.adSpend), fn(a.adClicks), 0,
+        f$(a.orderedRevenue), fp(a.returnRate),
+      ]),
+      csvReady: true,
+    } : null,
+    nextSteps: rows.length > 0 ? [
+      `Pause ads on these ${rows.length} ASINs immediately — recover ${f$(totalSpend)}`,
+      `Before re-enabling: fix listing images, bullet points, and price for each`,
+      `Check if these ASINs have organic sales — if not, consider removing them from catalog`,
+    ] : [
+      `All advertised ASINs are generating orders — no action needed here`,
+    ],
+    hasData: rows.length > 0,
+  };
+}
+
+// ── Zero Conversion: Campaigns with spend and zero orders ────────────────────
+function computeZeroConversionCampaigns(audit: AuditResult, limit: number): ComputedAnswer {
+  const rows = audit.campaignTable
+    .filter(c => c.spend > 5 && c.orders === 0)
+    .sort((a, b) => b.spend - a.spend)
+    .slice(0, limit);
+
+  const totalSpend = rows.reduce((s, c) => s + c.spend, 0);
+  const totalClicks = rows.reduce((s, c) => s + c.clicks, 0);
+
+  return {
+    intent: "zero_conversion_campaigns",
+    headline: rows.length > 0
+      ? `${rows.length} campaigns spending ${f$(totalSpend)} with zero orders`
+      : "All campaigns with meaningful spend are generating orders",
+    facts: [
+      `${rows.length} campaigns have spend >$5 and zero orders`,
+      `Total recoverable spend: ${f$(totalSpend)}`,
+      `Total wasted clicks: ${fn(totalClicks)}`,
+      rows[0] ? `Worst: "${rows[0].name}" — ${f$(rows[0].spend)} spend, ${fn(rows[0].clicks)} clicks, 0 orders` : "",
+      rows[1] ? `Second: "${rows[1].name}" — ${f$(rows[1].spend)}` : "",
+    ].filter(Boolean),
+    data: rows.length > 0 ? {
+      columns: ["#", "Campaign", "Spend", "Clicks", "Impressions", "CTR", "Orders"],
+      rows: rows.map((c, i) => [i+1, c.name.slice(0,45), f$(c.spend), fn(c.clicks), fn(c.impressions), fp(c.ctr), 0]),
+      csvReady: true,
+    } : null,
+    nextSteps: rows.length > 0 ? [
+      `Pause all ${rows.length} zero-order campaigns — ${f$(totalSpend)} is immediately recoverable`,
+      `Review keyword relevance before re-enabling — these campaigns may be targeting the wrong audience`,
+      `Reallocate budget to campaigns already generating orders`,
+    ] : [`All campaigns generating orders — no zero-conversion campaigns found`],
+    hasData: rows.length > 0,
+  };
+}
+
+// ── Zero Conversion: Keywords with spend and zero sales ──────────────────────
+function computeZeroConversionKeywords(audit: AuditResult, limit: number): ComputedAnswer {
+  const kwTable = audit.keywordTable ?? [];
+  const rows = kwTable
+    .filter(k => k.spend >= 5 && k.sales === 0)
+    .sort((a, b) => b.spend - a.spend)
+    .slice(0, limit);
+
+  const totalSpend  = rows.reduce((s, k) => s + k.spend, 0);
+  const totalClicks = rows.reduce((s, k) => s + k.clicks, 0);
+
+  return {
+    intent: "zero_conversion_keywords",
+    headline: rows.length > 0
+      ? `${rows.length} keywords burning ${f$(totalSpend)} with zero sales`
+      : "No keywords found spending ≥$5 with zero sales",
+    facts: [
+      `${rows.length} keywords have ≥$5 spend and zero attributed sales`,
+      `Total spend to recover: ${f$(totalSpend)}`,
+      `Total clicks that produced nothing: ${fn(totalClicks)}`,
+      rows[0] ? `Worst: "${rows[0].keyword}" [${rows[0].matchType}] in "${rows[0].campaignName}" — ${f$(rows[0].spend)} spent` : "",
+      rows[1] ? `Second: "${rows[1].keyword}" — ${f$(rows[1].spend)} spent, ${fn(rows[1].clicks)} clicks` : "",
+    ].filter(Boolean),
+    data: rows.length > 0 ? {
+      columns: ["#", "Keyword", "Match", "Campaign", "Spend", "Clicks", "Sales"],
+      rows: rows.map((k, i) => [i+1, k.keyword.slice(0,35), k.matchType, k.campaignName.slice(0,30), f$(k.spend), fn(k.clicks), "$0"]),
+      csvReady: true,
+    } : null,
+    nextSteps: rows.length > 0 ? [
+      `Pause these ${rows.length} zero-sales keywords immediately — recover ${f$(totalSpend)}`,
+      `Add as negatives to prevent them re-triggering on broad/phrase campaigns`,
+      `If keyword is relevant, check listing for relevance + conversion rate before re-enabling`,
+    ] : [`All spending keywords have generated at least some sales — healthy`],
+    hasData: rows.length > 0,
   };
 }
 
@@ -679,33 +823,40 @@ function computeAsinOverview(audit: AuditResult, limit: number): ComputedAnswer 
 }
 
 function computeKeywords(audit: AuditResult, limit: number): ComputedAnswer {
-  const kwWaste   = audit.findings.filter(f => f.category === "waste" && f.id.startsWith("kw-")).sort((a,b) => b.impact - a.impact);
+  const kwTable   = audit.keywordTable ?? [];
   const highAcos  = audit.findings.filter(f => f.id.startsWith("kw-acos-")).length;
   const zeroSales = audit.findings.filter(f => f.id.startsWith("kw-nosales-")).length;
   const lowCtr    = audit.findings.filter(f => f.id.startsWith("kw-ctr-")).length;
 
+  // Show actual keyword rows sorted by spend — far more useful than finding bullets
+  const topSpenders = kwTable.slice(0, limit);
+  const zeroSaleRows = kwTable.filter(k => k.spend >= 5 && k.sales === 0);
+  const highAcosRows = kwTable.filter(k => k.sales > 0 && k.acos > 0.5);
+  const totalKwSpend = kwTable.reduce((s, k) => s + k.spend, 0);
+  const wastingSpend = zeroSaleRows.reduce((s, k) => s + k.spend, 0);
+
   return {
     intent: "keyword_analysis",
-    headline: `${kwWaste.length} keyword issues — ${zeroSales} zero-sales, ${highAcos} high ACOS, ${lowCtr} low CTR`,
+    headline: `${audit.summary.keywordCount} keywords — ${zeroSales} zero-sales (${f$(wastingSpend)} wasted), ${highAcos} high ACOS`,
     facts: [
       `Total keywords: ${audit.summary.keywordCount}`,
-      `Keywords with issues: ${kwWaste.length}`,
-      `Zero-sales keywords (spending money, no return): ${zeroSales}`,
-      `High-ACOS keywords: ${highAcos}`,
+      `Total keyword spend: ${f$(totalKwSpend)}`,
+      `Zero-sales keywords spending ≥$5: ${zeroSaleRows.length} — ${f$(wastingSpend)} to recover`,
+      `High-ACOS keywords (>50%): ${highAcosRows.length}`,
       `Low-CTR keywords: ${lowCtr}`,
-      kwWaste[0] ? `Worst keyword: ${kwWaste[0].title} — ${f$(kwWaste[0].impact)} wasted` : "",
+      topSpenders[0] ? `Top spender: "${topSpenders[0].keyword}" [${topSpenders[0].matchType}] — ${f$(topSpenders[0].spend)} spend, ${f$(topSpenders[0].sales)} sales, ${fp(topSpenders[0].acos)} ACOS` : "",
     ].filter(Boolean),
-    data: kwWaste.slice(0, limit).length > 0 ? {
-      columns: ["#", "Issue", "Impact", "Severity", "Action"],
-      rows: kwWaste.slice(0, limit).map((f, i) => [i+1, f.title, f$(f.impact), f.severity.toUpperCase(), f.action]),
+    data: topSpenders.length > 0 ? {
+      columns: ["#", "Keyword", "Match", "Spend", "Sales", "ACOS", "CVR", "Orders"],
+      rows: topSpenders.map((k, i) => [i+1, k.keyword.slice(0,35), k.matchType, f$(k.spend), f$(k.sales), fp(k.acos), fp(k.cvr), fn(k.orders)]),
       csvReady: true,
     } : null,
     nextSteps: [
-      zeroSales > 0 ? `Pause ${zeroSales} zero-sales keywords immediately` : "",
-      highAcos > 0  ? `Reduce bids on ${highAcos} high-ACOS keywords` : "",
-      lowCtr > 0    ? `Review ad relevance for ${lowCtr} low-CTR keywords` : "",
+      zeroSaleRows.length > 0 ? `Pause ${zeroSaleRows.length} zero-sales keywords — recover ${f$(wastingSpend)}` : "",
+      highAcosRows.length > 0 ? `Reduce bids 20-30% on ${highAcosRows.length} high-ACOS keywords` : "",
+      lowCtr > 0              ? `Review ad creative/relevance for ${lowCtr} low-CTR keywords` : "",
     ].filter(Boolean),
-    hasData: kwWaste.length > 0,
+    hasData: kwTable.length > 0,
   };
 }
 
@@ -720,7 +871,7 @@ function computeRevenue(audit: AuditResult): ComputedAnswer {
       `Total ordered revenue: ${f$(summary.totalOrderedRevenue)}`,
       `Ad-attributed sales: ${f$(summary.totalSales)} (${adShare.toFixed(1)}% of total)`,
       `Total ordered units: ${fn(summary.totalOrderedUnits)}`,
-      `Average order value: ${summary.totalOrderedUnits > 0 ? f$(summary.totalOrderedRevenue / summary.totalOrderedUnits) : "N/A"}`,
+      `Average order value: ${summary.totalOrderedUnits > 0 ? f$(safeDiv(summary.totalOrderedRevenue, summary.totalOrderedUnits)) : "N/A"}`,
       `Return rate: ${fp(summary.returnRate)}`,
       `Revenue at risk from returns: ${f$(summary.totalOrderedRevenue * summary.returnRate)}`,
       `ACOS: ${fp(summary.avgAcos)} | CVR: ${fp(summary.avgCvr)}`,

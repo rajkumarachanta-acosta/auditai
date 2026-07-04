@@ -1,137 +1,129 @@
 import { NextRequest, NextResponse } from "next/server";
 import { AuditResult } from "@/lib/auditEngine";
+import { ComputedAnswer } from "@/lib/computeEngine";
 
-function buildContext(audit: AuditResult): string {
-  const { summary, score, scoreLabel, spendEfficiency, structureQuality,
-    totalWaste, totalOpportunity, findings, asinCohorts,
-    campaignTable, asinTable, keywordTable, hasCampaignData, hasSalesData } = audit;
+// ── AuditAI — expert Amazon analyst persona ──────────────────────────────────
+// GPT is a FORMATTER only. It receives pre-computed facts and writes prose.
+// It may NEVER invent, recalculate, or round any number not already in the DATA.
+// temperature: 0 — deterministic, no drift.
+// ─────────────────────────────────────────────────────────────────────────────
 
-  const f$ = (n: number) => n >= 1e6 ? `$${(n/1e6).toFixed(2)}M` : n >= 1e3 ? `$${(n/1e3).toFixed(1)}K` : `$${n.toFixed(2)}`;
-  const fp = (n: number) => `${(n*100).toFixed(2)}%`;
-  const fn = (n: number) => n.toLocaleString();
+const SYSTEM_PROMPT = `You are the analytical voice of AuditAI — a Senior Director of Amazon Advertising with 15+ years running Sponsored Products, Sponsored Brands, and Sponsored Display for Vendor and Seller Central accounts. You speak to brand managers, VPs, and CSMs. Your tone is decisive, quantified, and executive — never hedging.
 
-  const wasteFindings  = findings.filter(f => f.category === "waste").sort((a,b) => b.impact - a.impact);
-  const oppFindings    = findings.filter(f => f.category === "opportunity").sort((a,b) => b.impact - a.impact);
-  const critFindings   = findings.filter(f => f.severity === "critical");
+ABSOLUTE RULES — violating these makes your answer worthless:
 
-  const camps = campaignTable.slice(0, 60).map((c,i) =>
-    `${i+1}. "${c.name}" | Spend:${f$(c.spend)} Sales:${f$(c.sales)} ACOS:${fp(c.acos)} CVR:${fp(c.cvr)} CTR:${fp(c.ctr)} Orders:${c.orders} Clicks:${fn(c.clicks)}`
-  ).join("\n");
+1. NUMBERS ARE SACRED. Every number, dollar figure, percentage, ASIN, campaign name, and keyword in your response MUST come verbatim from the DATA block provided. You may NEVER invent, estimate, round differently, recalculate, or infer a number that is not explicitly in the DATA. If a number is not in the DATA, do not state it.
 
-  const keywords = (keywordTable ?? []).slice(0, 80).map((k,i) =>
-    `${i+1}. "${k.keyword}" [${k.matchType}] | Campaign:${k.campaignName} | Spend:${f$(k.spend)} Sales:${f$(k.sales)} ACOS:${fp(k.acos)} CTR:${fp(k.ctr)} CVR:${fp(k.cvr)} Orders:${k.orders} Clicks:${fn(k.clicks)}`
-  ).join("\n");
+2. YOU DO NOT DO MATH. The analysis engine already computed everything. Your job is to translate pre-computed facts into clear, confident prose. If you feel tempted to calculate, stop — the answer is already in the DATA.
 
-  const asins = asinTable.slice(0, 60).map((a,i) =>
-    `${i+1}. ${a.asin} "${a.title.slice(0,45)}" Brand:${a.brand} | Revenue:${f$(a.orderedRevenue)} Units:${fn(a.orderedUnits)} Views:${fn(a.pageViews)} CVR:${fp(a.cvr)} ACOS:${fp(a.acos)} Returns:${fp(a.returnRate)} AdSpend:${f$(a.adSpend)}`
-  ).join("\n");
+3. LEAD WITH THE HEADLINE. Open with the single most important finding (usually the provided headline), stated plainly. Then support it with the facts. Then give the action.
 
-  const waste = wasteFindings.slice(0, 20).map((f,i) =>
-    `${i+1}. [${f.severity.toUpperCase()}] ${f.title} | Impact:${f$(f.impact)} | ${f.detail} | Fix: ${f.action}`
-  ).join("\n");
+4. BE SPECIFIC AND DIRECTIVE. Say "Pause these 6 campaigns to recover $1,847" not "you may want to consider reviewing some campaigns." Name the ASIN, quote the ACOS, state the dollar recovery. An Amazon director does not hedge.
 
-  const opps = oppFindings.slice(0, 10).map((f,i) =>
-    `${i+1}. ${f.title} | Upside:${f$(f.impact*4)}/mo | ${f.detail} | Action: ${f.action}`
-  ).join("\n");
+5. RESPECT THE TABLE. A data table will be shown to the user separately, below your text. Do NOT reproduce the full table in your prose. Reference it ("the table below ranks all 14") and highlight only the top 1–3 rows that matter most.
 
-  const cohorts = asinCohorts.slice(0, 30).map(a =>
-    `${a.asin} [${a.cohort}] Rev:${f$(a.orderedRevenue)} Units:${fn(a.orderedUnits)} RevPerView:$${a.revenuePerView.toFixed(3)} Returns:${fp(a.returnRate)}`
-  ).join("\n");
+6. NEXT STEPS ARE COMMANDS. Frame the provided next steps as a prioritized action list the reader can execute today. Preserve every dollar figure exactly.
 
-  return `ACCOUNT DATA:
-Health Score: ${score}/100 (${scoreLabel}) | Spend Efficiency: ${spendEfficiency}/70 | Structure: ${structureQuality}/30
-Ad Spend: ${f$(summary.totalSpend)} | Ad Sales: ${f$(summary.totalSales)} | ACOS: ${fp(summary.avgAcos)} | CVR: ${fp(summary.avgCvr)} | CTR: ${fp(summary.avgCtr)}
-Impressions: ${fn(summary.totalImpressions)} | Clicks: ${fn(summary.totalClicks)} | Orders: ${fn(summary.totalOrders)}
-Ordered Revenue: ${f$(summary.totalOrderedRevenue)} | Units: ${fn(summary.totalOrderedUnits)} | Return Rate: ${fp(summary.returnRate)}
-Campaigns: ${summary.campaignCount} | Keywords: ${summary.keywordCount} | ASINs: ${summary.asinCount} | Top Brand: ${summary.topBrand}
-Total Waste: ${f$(totalWaste)} | Monthly Opportunity: ${f$(totalOpportunity)}
-Files: ${hasCampaignData ? "Bulk Campaign ✓" : "No campaign file"} | ${hasSalesData ? "Vendor Central ✓" : "No sales file"}
+7. LENGTH. 2–4 tight paragraphs OR a short lead + up to 5 bullet actions. Never pad. If the DATA says there's nothing to report, say so in one line — don't manufacture concern.
 
-WASTE FINDINGS (${wasteFindings.length} total, ${critFindings.length} critical):
-${waste || "None"}
+8. NO DISCLAIMERS. Never say "as an AI," never apologize, never caveat the data quality unless the DATA explicitly flags missing data.
 
-OPPORTUNITIES (${oppFindings.length} total):
-${opps || "None"}
+You are the expert the reader wishes they could hire. Sound like it.`;
 
-ALL KEYWORDS (${(keywordTable ?? []).length} total, sorted by spend):
-${keywords || "No keyword data"}
+function buildUserPayload(computed: ComputedAnswer, question: string, audit: AuditResult): string {
+  const tablePreview =
+    computed.data && computed.data.rows.length
+      ? `TABLE (${computed.data.rows.length} rows, shown separately — reference but don't reproduce):
+Columns: ${computed.data.columns.join(" | ")}
+Top rows:
+${computed.data.rows.slice(0, 5).map(r => r.join(" | ")).join("\n")}`
+      : "TABLE: none";
 
-ALL CAMPAIGNS (${campaignTable.length} total, sorted by spend):
-${camps || "No campaign data"}
+  // Minimal account context so GPT can reference totals if needed
+  const s = audit.summary;
+  const f$ = (n: number) => !Number.isFinite(n) ? "$0" : n >= 1e6 ? `$${(n/1e6).toFixed(2)}M` : n >= 1e3 ? `$${(n/1e3).toFixed(1)}K` : `$${n.toFixed(2)}`;
+  const fp = (n: number) => Number.isFinite(n) ? `${(n*100).toFixed(2)}%` : "0%";
 
-ALL ASINs (${asinTable.length} total, sorted by revenue):
-${asins || "No ASIN data"}
+  const accountCtx = `ACCOUNT TOTALS (reference only — use exact strings from FACTS above):
+Spend: ${f$(s.totalSpend)} | Sales: ${f$(s.totalSales)} | ACOS: ${fp(s.avgAcos)} | CVR: ${fp(s.avgCvr)}
+Campaigns: ${s.campaignCount} | Keywords: ${s.keywordCount} | ASINs: ${s.asinCount}
+Health: ${audit.score}/100 (${audit.scoreLabel}) | Waste: ${f$(audit.totalWaste)}`;
 
-ASIN COHORTS:
-${cohorts || "No cohort data"}`;
+  return `USER QUESTION: "${question}"
+
+=== PRE-COMPUTED DATA (ground truth — every number you use must appear here) ===
+
+HEADLINE: ${computed.headline}
+
+FACTS:
+${computed.facts.map(f => `• ${f}`).join("\n")}
+
+${tablePreview}
+
+RECOMMENDED NEXT STEPS:
+${computed.nextSteps.map((s, i) => `${i + 1}. ${s}`).join("\n")}
+
+${accountCtx}
+
+=== END DATA ===
+
+Write the expert response now. Lead with the headline finding, support with the facts, close with the prioritized actions. Every number verbatim from above.`;
 }
 
 export async function POST(req: NextRequest) {
   try {
-    const { question, audit, apiKey } = await req.json() as {
+    const { question, computed, audit } = await req.json() as {
       question: string;
+      computed: ComputedAnswer;
       audit: AuditResult;
-      apiKey?: string;
     };
 
-    if (!question || !audit) {
-      return NextResponse.json({ error: "Missing question or audit data" }, { status: 400 });
+    if (!question || !computed) {
+      return NextResponse.json({ error: "Missing question or computed answer" }, { status: 400 });
     }
 
-    const key = apiKey || process.env.OPENAI_API_KEY;
+    // Greetings and PowerPoint don't need GPT — return directly
+    if (computed.intent === "greeting" || computed.intent === "powerpoint") {
+      return NextResponse.json({ answer: computed.headline, source: "direct" });
+    }
+
+    const key = process.env.OPENAI_API_KEY;
     if (!key) {
       return NextResponse.json({ error: "NO_API_KEY" }, { status: 200 });
     }
 
-    const context = buildContext(audit);
+    const payload = buildUserPayload(computed, question, audit);
 
-    const systemPrompt = `You are AuditAI — an expert Amazon advertising analyst. You have full access to the account data below. You think like a senior PPC strategist who has managed hundreds of Amazon accounts.
+    const response = await fetch("https://api.openai.com/v1/chat/completions", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${key}`,
+      },
+      body: JSON.stringify({
+        model: "gpt-4o-mini",      // fast + cheap; gpt-4o for sharpest answers
+        messages: [
+          { role: "system", content: SYSTEM_PROMPT },
+          { role: "user",   content: payload },
+        ],
+        temperature: 0,            // deterministic — no drift, no invented numbers
+        max_tokens: 700,
+        top_p: 1,
+      }),
+    });
 
-ACCOUNT DATA:
-${context}
-
-Rules:
-- Answer based ONLY on the data above — never guess or hallucinate numbers
-- Be conversational, direct, and confident — like an analyst on a call with a client
-- Use exact numbers, campaign names, and ASINs from the data when relevant
-- If asked for a ranked list (top 10, top 20 etc), provide exactly that many items
-- Always end with 1-3 specific, prioritized next actions
-- For greetings or meta questions ("what is your name", "what can you do"), introduce yourself and list what you can help with
-- Keep responses focused and concise — no padding`;
-
-    const models = ["gpt-4o-mini", "gpt-4o", "gpt-3.5-turbo-16k"];
-
-    for (const model of models) {
-      const response = await fetch("https://api.openai.com/v1/chat/completions", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${key}`,
-        },
-        body: JSON.stringify({
-          model,
-          messages: [
-            { role: "system", content: systemPrompt },
-            { role: "user", content: question },
-          ],
-          max_tokens: 800,
-          temperature: 0.3,
-        }),
-      });
-
-      if (response.status === 404 || response.status === 400) continue;
-
-      if (!response.ok) {
-        const err = await response.json();
-        return NextResponse.json({ error: err.error?.message ?? "OpenAI error" }, { status: 200 });
-      }
-
-      const data   = await response.json();
-      const answer = data.choices?.[0]?.message?.content ?? "";
-      return NextResponse.json({ answer, model });
+    if (!response.ok) {
+      const err = await response.json().catch(() => ({}));
+      return NextResponse.json({ error: err.error?.message ?? `OpenAI ${response.status}`, source: "fallback" }, { status: 200 });
     }
 
-    return NextResponse.json({ error: "No model available" }, { status: 200 });
+    const out = await response.json();
+    const answer = out?.choices?.[0]?.message?.content?.trim() ?? "";
+    if (!answer) {
+      return NextResponse.json({ error: "Empty GPT response", source: "fallback" }, { status: 200 });
+    }
+
+    return NextResponse.json({ answer, source: "gpt", model: "gpt-4o-mini" });
 
   } catch {
     return NextResponse.json({ error: "Server error" }, { status: 500 });

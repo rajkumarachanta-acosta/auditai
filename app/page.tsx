@@ -106,8 +106,6 @@ export default function Home() {
   const [messages, setMessages]     = useState<ChatMessage[]>([]);
   const [input, setInput]           = useState("");
   const [isTyping, setIsTyping]     = useState(false);
-  const [apiKey, setApiKey]         = useState("");
-  const [showApiKey, setShowApiKey] = useState(false);
   const [brandName, setBrandName]   = useState("");
   const [activeTopic, setActiveTopic] = useState("all");
   const [isDragging, setIsDragging] = useState(false);
@@ -317,7 +315,7 @@ export default function Home() {
       const res = await fetch("/api/chat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ question: text, audit: {
+        body: JSON.stringify({ question: text, computed: localComputed, audit: {
           score: audit.score, scoreLabel: audit.scoreLabel,
           spendEfficiency: audit.spendEfficiency, structureQuality: audit.structureQuality,
           totalWaste: audit.totalWaste, totalOpportunity: audit.totalOpportunity,
@@ -330,7 +328,7 @@ export default function Home() {
           asinTable: audit.asinTable.slice(0, 40),
           keywordTable: (audit.keywordTable ?? []).slice(0, 60),
           criticalCount: audit.criticalCount,
-        }, apiKey }),
+        } }),
       });
       const data = await res.json();
       if (data.answer) {
@@ -605,11 +603,6 @@ export default function Home() {
           <div className="logo">{brand.logoText}<span>{brand.logoAccent}</span></div>
           <div className="nav-right">
             {screen === "chat" && brandName && <div className="brand-badge">{brandName}</div>}
-            {screen === "chat" && (
-              <button className={`api-btn${apiKey ? " connected" : ""}`} onClick={() => setShowApiKey(true)}>
-                {apiKey ? `✓ ${brand.apiKeyLabel}` : `⚡ Add ${brand.apiKeyLabel}`}
-              </button>
-            )}
             <span className="nav-meta"><span className="status-dot" />Ready</span>
           </div>
         </div>
@@ -855,27 +848,6 @@ export default function Home() {
         </div>
       </div>
 
-      {/* API KEY MODAL */}
-      {showApiKey && (
-        <div className="modal-overlay" onClick={() => setShowApiKey(false)}>
-          <div className="modal" onClick={e => e.stopPropagation()}>
-            <h2>{brand.apiKeyLabel} (Optional)</h2>
-            <p>The app gives accurate, data-driven answers without a key. An OpenAI key enhances the language quality of responses — all numbers still come from your data, never hallucinated.</p>
-            <input
-              className="modal-input"
-              type="password"
-              placeholder="sk-..."
-              value={apiKey}
-              onChange={e => setApiKey(e.target.value)}
-            />
-            <p className="modal-note">🔒 Stored in your browser only. Sent directly to OpenAI — never to our servers.</p>
-            <div className="modal-actions">
-              <button className="modal-btn" onClick={() => { setApiKey(""); setShowApiKey(false); }}>Clear</button>
-              <button className="modal-btn save" onClick={() => setShowApiKey(false)}>Save</button>
-            </div>
-          </div>
-        </div>
-      )}
     </>
   );
 }
