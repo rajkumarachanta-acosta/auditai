@@ -36,6 +36,22 @@ export interface CampaignRow {
   cvr: number;
 }
 
+// Pre-aggregated row for per-keyword table
+export interface KeywordRow {
+  keyword: string
+  matchType: string
+  campaignName: string
+  adGroupName: string
+  spend: number
+  sales: number
+  acos: number
+  clicks: number
+  impressions: number
+  orders: number
+  ctr: number
+  cvr: number
+}
+
 // Pre-aggregated row for per-ASIN table
 export interface AsinRow {
   asin: string;
@@ -221,6 +237,7 @@ export interface AuditResult {
   // Pre-aggregated tables for tabular chat responses
   campaignTable: CampaignRow[];
   asinTable: AsinRow[];
+  keywordTable: KeywordRow[];
   periodLabel: string;          // e.g. "Period A" or "Last 30 days"
 }
 
@@ -814,6 +831,29 @@ export function runAuditEngine(data: RawData): AuditResult {
     };
   }).sort((a, b) => b.orderedRevenue - a.orderedRevenue);
 
+  // ── Build per-keyword table ──
+  const keywordTable: KeywordRow[] = kwRows.map(row => {
+    const impr   = num(col(row, "Impressions"));
+    const clicks = num(col(row, "Clicks"));
+    const orders = num(col(row, "Orders"));
+    const spend  = num(col(row, "Spend"));
+    const sales  = num(col(row, "Sales"));
+    return {
+      keyword:      str(col(row, "Keyword Text")),
+      matchType:    str(col(row, "Match Type")),
+      campaignName: str(col(row, "_ResolvedCampaignName", "Campaign Name (Informational only)", "Campaign Name")),
+      adGroupName:  str(col(row, "Ad Group Name (Informational only)", "Ad Group Name")),
+      spend,
+      sales,
+      acos:  sales  > 0 ? spend  / sales  : 0,
+      clicks,
+      impressions: impr,
+      orders,
+      ctr:  impr   > 0 ? clicks / impr   : 0,
+      cvr:  clicks > 0 ? orders / clicks : 0,
+    };
+  }).sort((a, b) => b.spend - a.spend);
+
   // ── Assemble result ──
   return {
     score,
@@ -832,6 +872,7 @@ export function runAuditEngine(data: RawData): AuditResult {
     hasSalesData,
     campaignTable,
     asinTable,
+    keywordTable,
     periodLabel: "Current Period",
   };
 }

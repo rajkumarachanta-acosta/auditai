@@ -4,7 +4,7 @@ import { AuditResult } from "@/lib/auditEngine";
 function buildContext(audit: AuditResult): string {
   const { summary, score, scoreLabel, spendEfficiency, structureQuality,
     totalWaste, totalOpportunity, findings, asinCohorts,
-    campaignTable, asinTable, hasCampaignData, hasSalesData } = audit;
+    campaignTable, asinTable, keywordTable, hasCampaignData, hasSalesData } = audit;
 
   const f$ = (n: number) => n >= 1e6 ? `$${(n/1e6).toFixed(2)}M` : n >= 1e3 ? `$${(n/1e3).toFixed(1)}K` : `$${n.toFixed(2)}`;
   const fp = (n: number) => `${(n*100).toFixed(2)}%`;
@@ -16,6 +16,10 @@ function buildContext(audit: AuditResult): string {
 
   const camps = campaignTable.slice(0, 60).map((c,i) =>
     `${i+1}. "${c.name}" | Spend:${f$(c.spend)} Sales:${f$(c.sales)} ACOS:${fp(c.acos)} CVR:${fp(c.cvr)} CTR:${fp(c.ctr)} Orders:${c.orders} Clicks:${fn(c.clicks)}`
+  ).join("\n");
+
+  const keywords = (keywordTable ?? []).slice(0, 80).map((k,i) =>
+    `${i+1}. "${k.keyword}" [${k.matchType}] | Campaign:${k.campaignName} | Spend:${f$(k.spend)} Sales:${f$(k.sales)} ACOS:${fp(k.acos)} CTR:${fp(k.ctr)} CVR:${fp(k.cvr)} Orders:${k.orders} Clicks:${fn(k.clicks)}`
   ).join("\n");
 
   const asins = asinTable.slice(0, 60).map((a,i) =>
@@ -48,6 +52,9 @@ ${waste || "None"}
 
 OPPORTUNITIES (${oppFindings.length} total):
 ${opps || "None"}
+
+ALL KEYWORDS (${(keywordTable ?? []).length} total, sorted by spend):
+${keywords || "No keyword data"}
 
 ALL CAMPAIGNS (${campaignTable.length} total, sorted by spend):
 ${camps || "No campaign data"}

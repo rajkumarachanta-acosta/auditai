@@ -328,6 +328,7 @@ export default function Home() {
           topWaste: audit.topWaste, topOpportunities: audit.topOpportunities,
           campaignTable: audit.campaignTable.slice(0, 40),
           asinTable: audit.asinTable.slice(0, 40),
+          keywordTable: (audit.keywordTable ?? []).slice(0, 60),
           criticalCount: audit.criticalCount,
         }, apiKey }),
       });
