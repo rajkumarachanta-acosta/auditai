@@ -313,15 +313,23 @@ export default function Home() {
 
     // ── Step 2: Call GPT — it answers everything conversationally ──
     try {
-      const auditPayload = {
-        ...audit,
-        campaignTable: audit.campaignTable.slice(0, 60),
-        asinTable:     audit.asinTable.slice(0, 60),
-      };
-      const res  = await fetch("/api/chat", {
+      // Keep payload small — server rebuilds context from this
+      const res = await fetch("/api/chat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ question: text, audit: auditPayload, apiKey }),
+        body: JSON.stringify({ question: text, audit: {
+          score: audit.score, scoreLabel: audit.scoreLabel,
+          spendEfficiency: audit.spendEfficiency, structureQuality: audit.structureQuality,
+          totalWaste: audit.totalWaste, totalOpportunity: audit.totalOpportunity,
+          hasCampaignData: audit.hasCampaignData, hasSalesData: audit.hasSalesData,
+          periodLabel: audit.periodLabel, summary: audit.summary,
+          findings: audit.findings.slice(0, 50),
+          asinCohorts: audit.asinCohorts.slice(0, 30),
+          topWaste: audit.topWaste, topOpportunities: audit.topOpportunities,
+          campaignTable: audit.campaignTable.slice(0, 40),
+          asinTable: audit.asinTable.slice(0, 40),
+          criticalCount: audit.criticalCount,
+        }, apiKey }),
       });
       const data = await res.json();
       if (data.answer) {
@@ -329,7 +337,15 @@ export default function Home() {
         addBotMessage(data.answer.replace(/\n/g, "<br>"));
         return;
       }
-    } catch { /* fall through to local */ }
+      // Show error in chat so we can debug
+      if (data.error && data.error !== "NO_API_KEY") {
+        setIsTyping(false);
+        addBotMessage(`⚠️ GPT error: ${data.error}`);
+        return;
+      }
+    } catch (err) {
+      console.error("GPT call failed:", err);
+    }
 
     // ── Step 3: Local computed fallback (no API key) ──
     await new Promise(r => setTimeout(r, 400));
