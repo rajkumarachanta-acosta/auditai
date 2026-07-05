@@ -1,0 +1,1021 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Keyword Harvest — Reverse-ASIN Lookup</title>
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  :root {
+    --bg: #ffffff;
+    --surface: #f7f8fa;
+    --border: #e5e7eb;
+    --text: #1f2328;
+    --muted: #57606a;
+    --accent: #3b82d4;
+    --green-bg: #f0fdf4;
+    --green-border: #bbf7d0;
+    --red: #dc2626;
+    --badge1: #1d4ed8;
+    --badge2: #7c3aed;
+    --badge3: #0369a1;
+    --font: -apple-system, "Segoe UI", system-ui, sans-serif;
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #0d1117;
+      --surface: #161b22;
+      --border: #30363d;
+      --text: #e6edf3;
+      --muted: #8b949e;
+      --green-bg: #0d2818;
+      --green-border: #166534;
+    }
+  }
+
+  body { font-family: var(--font); font-size: 14px; line-height: 1.6; color: var(--text); background: var(--bg); }
+
+  .container { max-width: 860px; margin: 0 auto; padding: 24px 16px 64px; }
+
+  /* Header */
+  .header { border-bottom: 1px solid var(--border); padding-bottom: 16px; margin-bottom: 24px; }
+  .header h1 { font-size: 20px; font-weight: 700; }
+  .header p { color: var(--muted); margin-top: 4px; font-size: 13px; }
+  .privacy-note { display: inline-block; margin-top: 6px; background: var(--surface); border: 1px solid var(--border); border-radius: 4px; padding: 4px 10px; font-size: 12px; color: var(--muted); }
+
+  /* Section labels */
+  .section-label { font-weight: 600; font-size: 13px; margin-bottom: 8px; display: block; }
+
+  /* Drop zone */
+  .drop-zone {
+    border: 2px dashed var(--border); border-radius: 8px; padding: 36px 24px;
+    text-align: center; cursor: pointer; background: var(--surface);
+    transition: border-color 0.15s, background 0.15s;
+    margin-bottom: 16px;
+  }
+  .drop-zone.drag-over { border-color: var(--accent); background: #eff6ff; }
+  .drop-zone input[type=file] { display: none; }
+  .drop-zone-icon { font-size: 32px; margin-bottom: 8px; }
+  .drop-zone-text { color: var(--muted); font-size: 13px; }
+  .drop-zone-text strong { color: var(--accent); cursor: pointer; }
+
+  /* Progress */
+  .file-info { background: var(--surface); border: 1px solid var(--border); border-radius: 6px; padding: 12px 16px; margin-bottom: 16px; display: none; }
+  .file-name { font-weight: 600; }
+  .file-meta { color: var(--muted); font-size: 12px; margin-top: 2px; }
+  .progress-wrap { margin-top: 10px; }
+  .progress-bar-track { background: var(--border); border-radius: 99px; height: 6px; overflow: hidden; }
+  .progress-bar-fill { height: 100%; background: var(--accent); border-radius: 99px; width: 0; transition: width 0.1s; }
+  .progress-text { font-size: 12px; color: var(--muted); margin-top: 4px; }
+  .parse-summary { font-size: 13px; color: var(--text); margin-top: 8px; font-weight: 500; }
+
+  /* ASIN input */
+  .asin-section { margin-bottom: 20px; }
+  textarea#asin-input {
+    width: 100%; min-height: 70px; padding: 10px 12px;
+    border: 1px solid var(--border); border-radius: 6px;
+    font-family: var(--font); font-size: 13px; background: var(--bg); color: var(--text);
+    resize: vertical;
+  }
+  textarea#asin-input:focus { outline: 2px solid var(--accent); outline-offset: -1px; }
+  .asin-tags { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; min-height: 24px; }
+  .asin-tag { padding: 2px 10px; border-radius: 99px; font-size: 12px; font-weight: 600; font-family: monospace; border: 1px solid; }
+  .asin-tag.valid { background: #eff6ff; border-color: #93c5fd; color: #1d4ed8; }
+  .asin-tag.invalid { background: #fef2f2; border-color: #fca5a5; color: var(--red); }
+
+  /* Calibration panel */
+  .calibration { border: 1px solid var(--border); border-radius: 6px; margin-bottom: 20px; }
+  .calibration summary { padding: 10px 14px; cursor: pointer; font-size: 13px; font-weight: 600; color: var(--muted); list-style: none; display: flex; align-items: center; gap: 6px; }
+  .calibration summary::before { content: "▶"; font-size: 10px; transition: transform 0.15s; }
+  .calibration[open] summary::before { transform: rotate(90deg); }
+  .calibration-body { padding: 12px 14px; border-top: 1px solid var(--border); display: flex; gap: 24px; flex-wrap: wrap; }
+  .cal-field label { font-size: 12px; color: var(--muted); display: block; margin-bottom: 3px; }
+  .cal-field input { width: 120px; padding: 5px 8px; border: 1px solid var(--border); border-radius: 4px; font-size: 13px; background: var(--bg); color: var(--text); }
+  .cal-field small { display: block; font-size: 11px; color: var(--muted); margin-top: 2px; }
+
+  /* Run button */
+  #run-btn {
+    display: block; width: 100%; padding: 11px; border: none;
+    background: var(--accent); color: #fff; font-size: 14px; font-weight: 600;
+    border-radius: 6px; cursor: pointer; transition: opacity 0.15s;
+    margin-bottom: 24px;
+  }
+  #run-btn:disabled { opacity: 0.45; cursor: not-allowed; }
+  #run-btn:not(:disabled):hover { opacity: 0.88; }
+
+  /* Error banner */
+  .error-banner { background: #fef2f2; border: 1px solid #fca5a5; color: var(--red); border-radius: 6px; padding: 10px 14px; font-size: 13px; margin-bottom: 16px; display: none; }
+  .error-banner ul { margin: 6px 0 0 18px; }
+
+  /* Results section */
+  #results-section { display: none; }
+
+  .summary-strip {
+    background: var(--surface); border: 1px solid var(--border); border-radius: 6px;
+    padding: 10px 16px; display: flex; flex-wrap: wrap; gap: 16px;
+    margin-bottom: 12px; font-size: 13px;
+  }
+  .summary-stat strong { font-size: 15px; display: block; }
+  .summary-stat small { color: var(--muted); font-size: 11px; }
+  .opp-badge { color: #16a34a; }
+
+  /* Filter + export row */
+  .table-toolbar { display: flex; gap: 10px; align-items: center; margin-bottom: 10px; flex-wrap: wrap; }
+  .table-toolbar input[type=text] {
+    flex: 1; min-width: 160px; padding: 7px 10px;
+    border: 1px solid var(--border); border-radius: 5px;
+    font-size: 13px; background: var(--bg); color: var(--text);
+  }
+  .table-toolbar input[type=text]:focus { outline: 2px solid var(--accent); outline-offset: -1px; }
+  #export-btn {
+    padding: 7px 16px; background: var(--surface); border: 1px solid var(--border);
+    border-radius: 5px; font-size: 13px; cursor: pointer; color: var(--text); white-space: nowrap;
+  }
+  #export-btn:hover { border-color: var(--accent); }
+
+  /* Table */
+  .table-wrap { overflow-x: auto; border: 1px solid var(--border); border-radius: 6px; }
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  thead th {
+    background: var(--surface); padding: 9px 12px; text-align: left;
+    font-weight: 600; font-size: 12px; color: var(--muted);
+    border-bottom: 1px solid var(--border); white-space: nowrap; cursor: pointer;
+    user-select: none; position: sticky; top: 0;
+  }
+  thead th:hover { color: var(--accent); }
+  thead th .sort-arrow { font-size: 10px; margin-left: 3px; }
+  tbody tr { border-bottom: 1px solid var(--border); }
+  tbody tr:last-child { border-bottom: none; }
+  tbody tr.opp-row { background: var(--green-bg); }
+  tbody td { padding: 8px 12px; vertical-align: middle; }
+  tbody td.keyword-cell { max-width: 220px; word-break: break-word; }
+  tbody td.num-cell { text-align: right; font-variant-numeric: tabular-nums; }
+
+  /* Badges */
+  .pos-badge {
+    display: inline-block; padding: 1px 7px; border-radius: 99px;
+    font-size: 11px; font-weight: 700; color: #fff;
+  }
+  .pos-1 { background: var(--badge1); }
+  .pos-2 { background: var(--badge2); }
+  .pos-3 { background: var(--badge3); }
+
+  /* Show more */
+  #show-more-btn {
+    display: block; margin: 12px auto 0;
+    padding: 8px 24px; border: 1px solid var(--border);
+    border-radius: 5px; background: var(--surface);
+    font-size: 13px; cursor: pointer; color: var(--text);
+  }
+  #show-more-btn:hover { border-color: var(--accent); }
+
+  .empty-state { padding: 40px; text-align: center; color: var(--muted); font-size: 14px; }
+
+  /* Footer */
+  footer { margin-top: 40px; padding-top: 16px; border-top: 1px solid var(--border); text-align: center; font-size: 12px; color: var(--muted); }
+</style>
+</head>
+<body>
+<div class="container">
+
+  <!-- HEADER -->
+  <div class="header">
+    <h1>🌾 Keyword Harvest</h1>
+    <p>Reverse-ASIN lookup powered by Amazon Brand Analytics "Top Search Terms" data.</p>
+    <span class="privacy-note">🔒 All processing happens in your browser — no data leaves this page.</span>
+  </div>
+
+  <!-- ERROR BANNER -->
+  <div class="error-banner" id="error-banner"></div>
+
+  <!-- FILE DROP ZONE -->
+  <span class="section-label">1. Upload Brand Analytics CSV</span>
+  <div class="drop-zone" id="drop-zone">
+    <input type="file" id="file-input" accept=".csv,.txt">
+    <div class="drop-zone-icon">📂</div>
+    <div class="drop-zone-text">
+      Drag &amp; drop your Top Search Terms CSV here, or <strong id="browse-link">browse</strong>
+    </div>
+  </div>
+
+  <div class="file-info" id="file-info">
+    <div class="file-name" id="file-name-display"></div>
+    <div class="file-meta" id="file-meta-display"></div>
+    <div class="progress-wrap" id="progress-wrap">
+      <div class="progress-bar-track"><div class="progress-bar-fill" id="progress-fill"></div></div>
+      <div class="progress-text" id="progress-text">Parsing…</div>
+    </div>
+    <div class="parse-summary" id="parse-summary" style="display:none"></div>
+  </div>
+
+  <!-- ASIN INPUT -->
+  <div class="asin-section">
+    <span class="section-label">2. Enter target ASINs</span>
+    <textarea id="asin-input" placeholder="B01234ABCD, B09876ZYXW&#10;One per line or comma-separated"></textarea>
+    <div class="asin-tags" id="asin-tags"></div>
+  </div>
+
+  <!-- CALIBRATION PANEL -->
+  <details class="calibration" id="calibration-panel">
+    <summary>Volume estimation calibration</summary>
+    <div class="calibration-body">
+      <div class="cal-field">
+        <label for="cal-k">K (scale constant)</label>
+        <input type="number" id="cal-k" value="8000000" min="1">
+        <small>Default: 8,000,000</small>
+      </div>
+      <div class="cal-field">
+        <label for="cal-b">b (power exponent)</label>
+        <input type="number" id="cal-b" value="0.35" step="0.01" min="0.01" max="2">
+        <small>Default: 0.35</small>
+      </div>
+      <div class="cal-field" style="align-self:flex-end; padding-bottom:2px;">
+        <small style="font-size:12px;">Est. = K × SFR<sup>−b</sup> ± 40%</small>
+      </div>
+    </div>
+  </details>
+
+  <!-- RUN BUTTON -->
+  <button id="run-btn" disabled>Run Reverse-ASIN Lookup</button>
+
+  <!-- RESULTS -->
+  <div id="results-section">
+    <div class="summary-strip" id="summary-strip"></div>
+    <div class="table-toolbar">
+      <input type="text" id="filter-input" placeholder="Filter keywords…">
+      <button id="export-btn">⬇ Export CSV</button>
+    </div>
+    <div class="table-wrap">
+      <table id="results-table">
+        <thead id="results-thead"></thead>
+        <tbody id="results-tbody"></tbody>
+      </table>
+    </div>
+    <button id="show-more-btn" style="display:none"></button>
+  </div>
+
+</div><!-- /container -->
+
+<footer>
+  <p>Keyword Harvest · v1.0 · All data stays in your browser · Made with IBM Bob</p>
+</footer>
+
+<script>
+// =============================================================================
+// CONSTANTS
+// =============================================================================
+const K_DEFAULT = 8_000_000;
+const B_DEFAULT = 0.35;
+const PAGE_SIZE  = 500;
+
+// =============================================================================
+// WORKER SOURCE (inline via Blob URL)
+// =============================================================================
+const WORKER_SRC = `
+'use strict';
+
+// ---- CSV chunk reader -------------------------------------------------------
+// Streams the file in 4MB slices, accumulates a line buffer, emits parsed rows.
+
+const CHUNK_SIZE = 4 * 1024 * 1024; // 4 MB
+
+self.onmessage = async function(e) {
+  const { file, targetAsins: targetAsinsArr, K, b } = e.data;
+  // targetAsins is sent as an Array (Sets are not structuredClone-safe across all browsers)
+  const targetAsins = new Set((targetAsinsArr || []).map(a => a.toUpperCase()));
+
+  // ── 1. Read & parse the entire CSV in chunks ─────────────────────────────
+  const totalSize = file.size;
+  let offset = 0;
+  let lineBuffer = '';
+  let headerRow = null;
+  let colMap = null;        // { sfr, term, asins: [{asin,cs,cvs}] } → column indices
+  let rows = [];            // lightweight: store only what we need
+  let totalRowsParsed = 0;
+  let detectedRange = null;
+  let lastProgressSent = Date.now();
+
+  const decoder = new TextDecoder('utf-8');
+
+  while (offset < totalSize) {
+    const slice = file.slice(offset, offset + CHUNK_SIZE);
+    const arrayBuf = await slice.arrayBuffer();
+    const text = decoder.decode(arrayBuf, { stream: true });
+    lineBuffer += text;
+    offset += CHUNK_SIZE;
+
+    // Process complete lines (keep trailing partial)
+    let lastNL = lineBuffer.lastIndexOf('\\n');
+    if (lastNL === -1 && offset < totalSize) continue; // no full line yet
+    const chunk = lastNL === -1 ? lineBuffer : lineBuffer.slice(0, lastNL + 1);
+    lineBuffer = lastNL === -1 ? '' : lineBuffer.slice(lastNL + 1);
+
+    const lines = chunk.split('\\n');
+    for (const rawLine of lines) {
+      const line = rawLine.replace(/\\r$/, '');
+      if (!line.trim()) continue;
+
+      // ── header detection ─────────────────────────────────────────────────
+      if (!headerRow) {
+        const lc = line.toLowerCase();
+        // Detect date-range from metadata rows before header
+        if (!detectedRange && (lc.includes('report') || lc.includes('week') || lc.includes('period'))) {
+          const m = line.match(/\\d{4}-\\d{2}-\\d{2}/g);
+          if (m && m.length >= 1) detectedRange = m.join(' – ');
+        }
+        if (lc.includes('search frequency')) {
+          headerRow = parseCSVLine(line);
+          colMap = buildColMap(headerRow);
+          if (colMap.error) {
+            self.postMessage({ type: 'error', message: colMap.error });
+            return;
+          }
+        }
+        continue;
+      }
+
+      // ── data row ─────────────────────────────────────────────────────────
+      const cells = parseCSVLine(line);
+      if (cells.length < 4) continue;
+
+      const termRaw   = cells[colMap.term]  || '';
+      const sfrRaw    = cells[colMap.sfr]   || '';
+      const term      = termRaw.trim();
+      const sfr       = parseInt(sfrRaw.replace(/,/g, ''), 10);
+      if (!term || isNaN(sfr)) continue;
+
+      // Check each position
+      for (const pos of colMap.positions) {
+        const asinVal = (cells[pos.asinIdx] || '').trim().toUpperCase();
+        if (!asinVal) continue;
+        if (!targetAsins.has(asinVal)) continue;
+
+        const cs  = parsePercent(cells[pos.csIdx]  || '0');
+        const cvs = parsePercent(cells[pos.cvsIdx] || '0');
+
+        rows.push({ asin: asinVal, searchTerm: term, sfr, clickPosition: pos.num, clickShare: cs, conversionShare: cvs });
+      }
+
+      totalRowsParsed++;
+    }
+
+    // ── progress reporting ────────────────────────────────────────────────
+    const now = Date.now();
+    if (now - lastProgressSent >= 200 || offset >= totalSize) {
+      self.postMessage({ type: 'progress', pct: Math.min(99, Math.round(offset / totalSize * 100)), rows: totalRowsParsed });
+      lastProgressSent = now;
+    }
+  }
+
+  // flush remaining line buffer
+  if (lineBuffer.trim() && headerRow) {
+    const cells = parseCSVLine(lineBuffer.trim());
+    if (cells.length >= 4) {
+      const termRaw   = cells[colMap.term]  || '';
+      const sfrRaw    = cells[colMap.sfr]   || '';
+      const term      = termRaw.trim();
+      const sfr       = parseInt(sfrRaw.replace(/,/g, ''), 10);
+      if (term && !isNaN(sfr)) {
+        for (const pos of colMap.positions) {
+          const asinVal = (cells[pos.asinIdx] || '').trim().toUpperCase();
+          if (!asinVal) continue;
+          if (!targetAsins.has(asinVal)) continue;
+          const cs  = parsePercent(cells[pos.csIdx]  || '0');
+          const cvs = parsePercent(cells[pos.cvsIdx] || '0');
+          rows.push({ asin: asinVal, searchTerm: term, sfr, clickPosition: pos.num, clickShare: cs, conversionShare: cvs });
+        }
+        totalRowsParsed++;
+      }
+    }
+  }
+
+  if (!headerRow) {
+    self.postMessage({ type: 'error', message: 'Could not detect a header row containing "Search Frequency Rank". Please verify this is a Brand Analytics Top Search Terms export.' });
+    return;
+  }
+
+  // ── 2. Add volume estimates ───────────────────────────────────────────────
+  for (const r of rows) {
+    const est = K * Math.pow(r.sfr, -b);
+    r.estVolumeLow  = Math.round(est * 0.6);
+    r.estVolumeHigh = Math.round(est * 1.4);
+  }
+
+  self.postMessage({ type: 'done', results: rows, totalRows: totalRowsParsed, detectedRange });
+};
+
+// ── CSV line parser (handles quoted fields) ──────────────────────────────────
+function parseCSVLine(line) {
+  const cols = [];
+  let cur = '';
+  let inQ = false;
+  for (let i = 0; i < line.length; i++) {
+    const c = line[i];
+    if (c === '"') {
+      if (inQ && line[i+1] === '"') { cur += '"'; i++; }
+      else inQ = !inQ;
+    } else if (c === ',' && !inQ) {
+      cols.push(cur); cur = '';
+    } else {
+      cur += c;
+    }
+  }
+  cols.push(cur);
+  return cols;
+}
+
+// ── Column map builder ───────────────────────────────────────────────────────
+// Uses a normalised column key (strip #/spaces/punctuation) for robust matching.
+function normaliseCol(h) {
+  return (h || '').toLowerCase().replace(/[^a-z0-9]/g, ' ').replace(/\\s+/g, ' ').trim();
+}
+
+function buildColMap(headers) {
+  const norm = headers.map(normaliseCol);
+
+  // Search term — must contain "search term" (not "search frequency")
+  const termIdx = norm.findIndex(h => h.includes('search term') && !h.includes('frequency'));
+
+  // SFR — contains "search frequency"
+  const sfrIdx = norm.findIndex(h => h.includes('search frequency'));
+
+  const missing = [];
+  if (termIdx === -1)  missing.push('"Search Term"');
+  if (sfrIdx  === -1)  missing.push('"Search Frequency Rank"');
+
+  // For each position 1/2/3 find: clicked asin, click share (not conversion), conversion share.
+  // normaliseCol already collapses all non-alphanumeric chars to single spaces,
+  // so we can use word-split matching without any regex escaping.
+  const positions = [];
+  const posTokens = {
+    1: ['1', 'one', '1st', 'first'],
+    2: ['2', 'two', '2nd', 'second'],
+    3: ['3', 'three', '3rd', 'third']
+  };
+
+  function hasPosTok(h, tokens) {
+    const words = h.split(' ');
+    return tokens.some(t => words.includes(t));
+  }
+
+  for (const num of [1, 2, 3]) {
+    const tokens = posTokens[num];
+
+    // ASIN: normalised col contains "asin" + position token as a whole word
+    const asinIdx = norm.findIndex(h =>
+      h.includes('asin') && hasPosTok(h, tokens)
+    );
+
+    // Click share: contains "click share" but NOT "conversion" + position token
+    const csIdx = norm.findIndex(h =>
+      !h.includes('conversion') &&
+      h.includes('click') && (h.includes('share') || h.includes('%')) &&
+      hasPosTok(h, tokens)
+    );
+
+    // Conversion share: contains "conversion" + position token
+    const cvsIdx = norm.findIndex(h =>
+      h.includes('conversion') && hasPosTok(h, tokens)
+    );
+
+    if (asinIdx === -1) { missing.push('"#' + num + ' Clicked ASIN"'); continue; }
+    if (csIdx  === -1)  { missing.push('"#' + num + ' Click Share"');   continue; }
+    if (cvsIdx === -1)  { missing.push('"#' + num + ' Conversion Share"'); continue; }
+
+    positions.push({ num, asinIdx, csIdx, cvsIdx });
+  }
+
+  if (missing.length) {
+    const found = headers.filter(Boolean).slice(0, 20).join(', ');
+    return { error: 'Missing required columns: ' + missing.join(', ') + '.\\n\\nFirst 20 columns found in file: ' + found };
+  }
+
+  return { term: termIdx, sfr: sfrIdx, positions };
+}
+
+// ── Parse "12.34%" or "0.1234" → numeric percent ────────────────────────────
+function parsePercent(val) {
+  val = (val || '').trim();
+  if (val.endsWith('%')) return parseFloat(val) || 0;
+  const n = parseFloat(val);
+  if (isNaN(n)) return 0;
+  // If < 1 and not explicitly "%" it's likely a decimal fraction
+  return n < 1 ? n * 100 : n;
+}
+`;
+
+// =============================================================================
+// MAIN THREAD GLOBALS
+// =============================================================================
+let parsedResults   = [];    // all result records from worker
+let filteredResults = [];    // after filter/sort
+let currentPage     = 0;
+let sortCol         = 'sfr';
+let sortDir         = 'asc';
+let multipleAsins   = false;
+let workerBlobUrl   = null;
+
+// =============================================================================
+// DOM REFS
+// =============================================================================
+const dropZone      = document.getElementById('drop-zone');
+const fileInput     = document.getElementById('file-input');
+const browseLink    = document.getElementById('browse-link');
+const fileInfoEl    = document.getElementById('file-info');
+const fileNameEl    = document.getElementById('file-name-display');
+const fileMetaEl    = document.getElementById('file-meta-display');
+const progressWrap  = document.getElementById('progress-wrap');
+const progressFill  = document.getElementById('progress-fill');
+const progressText  = document.getElementById('progress-text');
+const parseSummary  = document.getElementById('parse-summary');
+const asinInput     = document.getElementById('asin-input');
+const asinTagsEl    = document.getElementById('asin-tags');
+const runBtn        = document.getElementById('run-btn');
+const errorBanner   = document.getElementById('error-banner');
+const resultsSection= document.getElementById('results-section');
+const summaryStrip  = document.getElementById('summary-strip');
+const filterInput   = document.getElementById('filter-input');
+const exportBtn     = document.getElementById('export-btn');
+const resultsTbody  = document.getElementById('results-tbody');
+const resultsThead  = document.getElementById('results-thead');
+const showMoreBtn   = document.getElementById('show-more-btn');
+
+// =============================================================================
+// STATE
+// =============================================================================
+let fileReady    = false;
+let loadedFile   = null;
+let totalRowsInFile = 0;
+let detectedRange = null;
+
+// =============================================================================
+// ASIN PARSING & VALIDATION
+// =============================================================================
+const ASIN_RE = /^B0[A-Z0-9]{8}$/i;
+
+function parseAsins(raw) {
+  const tokens = raw.split(/[\s,;\n]+/).map(t => t.trim()).filter(Boolean);
+  const valid   = [];
+  const invalid = [];
+  const seen = new Set();
+  for (const t of tokens) {
+    if (ASIN_RE.test(t)) {
+      const u = t.toUpperCase();
+      if (!seen.has(u)) { valid.push(u); seen.add(u); }
+    } else {
+      invalid.push(t);
+    }
+  }
+  return { valid, invalid };
+}
+
+function renderAsinTags() {
+  const { valid, invalid } = parseAsins(asinInput.value);
+  asinTagsEl.innerHTML = '';
+  for (const a of valid) {
+    const span = document.createElement('span');
+    span.className = 'asin-tag valid';
+    span.textContent = a;
+    asinTagsEl.appendChild(span);
+  }
+  for (const a of invalid) {
+    const span = document.createElement('span');
+    span.className = 'asin-tag invalid';
+    span.title = 'Not a valid ASIN (B0 + 8 alphanumeric)';
+    span.textContent = a + ' ✗';
+    asinTagsEl.appendChild(span);
+  }
+  checkRunReady();
+}
+
+asinInput.addEventListener('input', renderAsinTags);
+
+// =============================================================================
+// RUN BUTTON GUARD
+// =============================================================================
+function checkRunReady() {
+  const { valid } = parseAsins(asinInput.value);
+  runBtn.disabled = !(fileReady && valid.length > 0);
+}
+
+// =============================================================================
+// FILE DROP / BROWSE
+// =============================================================================
+browseLink.addEventListener('click', () => fileInput.click());
+dropZone.addEventListener('click', () => fileInput.click());
+
+dropZone.addEventListener('dragover', e => { e.preventDefault(); dropZone.classList.add('drag-over'); });
+dropZone.addEventListener('dragleave', () => dropZone.classList.remove('drag-over'));
+dropZone.addEventListener('drop', e => {
+  e.preventDefault();
+  dropZone.classList.remove('drag-over');
+  const f = e.dataTransfer.files[0];
+  if (f) handleFile(f);
+});
+fileInput.addEventListener('change', () => { if (fileInput.files[0]) handleFile(fileInput.files[0]); });
+
+function handleFile(file) {
+  fileReady = false;
+  loadedFile = file;
+  checkRunReady();
+  hideError();
+
+  fileNameEl.textContent = file.name;
+  fileMetaEl.textContent = formatBytes(file.size);
+  fileInfoEl.style.display = 'block';
+  progressWrap.style.display = 'block';
+  parseSummary.style.display = 'none';
+  setProgress(0, 'Starting…');
+
+  // Spin up worker
+  if (!workerBlobUrl) {
+    const blob = new Blob([WORKER_SRC], { type: 'application/javascript' });
+    workerBlobUrl = URL.createObjectURL(blob);
+  }
+
+  const w = new Worker(workerBlobUrl);
+
+  // We'll pass an empty set for ASINs during pre-parse — worker only matches
+  // ASINs during the lookup phase. But for the parse phase we want to count rows.
+  // Solution: pass null targetAsins, worker counts rows but emits no result records.
+  // Actually, architecture-wise it's simpler to re-run on "Run" click with real ASINs
+  // since a 200MB file re-parse in worker is still < 5s.
+  // Pre-parse: just validate the file structure & count rows.
+  // Sets are not safely structuredClone'd across all browsers; send as Array
+  w.postMessage({ file, targetAsins: ['__PREFLIGHT__'], K: getK(), b: getB() });
+
+  w.onmessage = (ev) => {
+    const msg = ev.data;
+    if (msg.type === 'progress') {
+      setProgress(msg.pct, `Parsing… ${fmtNum(msg.rows)} rows`);
+    } else if (msg.type === 'error') {
+      showError(msg.message);
+      w.terminate();
+    } else if (msg.type === 'done') {
+      totalRowsInFile = msg.totalRows;
+      detectedRange   = msg.detectedRange;
+      setProgress(100, 'Done');
+      progressWrap.style.display = 'none';
+      const rangeStr = detectedRange ? ` · week of ${detectedRange}` : '';
+      parseSummary.textContent = `Parsed ${fmtNum(totalRowsInFile)} search terms${rangeStr}`;
+      parseSummary.style.display = 'block';
+      fileReady = true;
+      checkRunReady();
+      w.terminate();
+    }
+  };
+
+  w.onerror = (err) => {
+    showError('Worker error: ' + (err.message || 'Unknown'));
+    w.terminate();
+  };
+}
+
+// =============================================================================
+// RUN
+// =============================================================================
+runBtn.addEventListener('click', () => {
+  if (!loadedFile) return;
+  const { valid } = parseAsins(asinInput.value);
+  if (!valid.length) return;
+  hideError();
+  multipleAsins = valid.length > 1;
+
+  runBtn.disabled = true;
+  runBtn.textContent = 'Running…';
+  resultsSection.style.display = 'none';
+
+  const w = new Worker(workerBlobUrl);
+  w.postMessage({ file: loadedFile, targetAsins: valid, K: getK(), b: getB() });
+
+  w.onmessage = (ev) => {
+    const msg = ev.data;
+    if (msg.type === 'progress') {
+      runBtn.textContent = `Running… ${msg.pct}%`;
+    } else if (msg.type === 'error') {
+      showError(msg.message);
+      runBtn.disabled = false;
+      runBtn.textContent = 'Run Reverse-ASIN Lookup';
+      w.terminate();
+    } else if (msg.type === 'done') {
+      parsedResults = msg.results;
+      runBtn.disabled = false;
+      runBtn.textContent = 'Run Reverse-ASIN Lookup';
+      checkRunReady();
+      renderResults();
+      w.terminate();
+    }
+  };
+
+  w.onerror = (err) => {
+    showError('Worker error: ' + (err.message || 'Unknown'));
+    runBtn.disabled = false;
+    runBtn.textContent = 'Run Reverse-ASIN Lookup';
+    w.terminate();
+  };
+});
+
+// =============================================================================
+// RESULTS RENDERING
+// =============================================================================
+function renderResults() {
+  // Build columns list
+  buildTableHeader();
+  applyFilterAndSort();
+  resultsSection.style.display = 'block';
+  window.scrollTo({ top: document.getElementById('results-section').offsetTop - 12, behavior: 'smooth' });
+}
+
+function buildTableHeader() {
+  const cols = getColumns();
+  resultsThead.innerHTML = '';
+  const tr = document.createElement('tr');
+  for (const col of cols) {
+    const th = document.createElement('th');
+    th.innerHTML = col.label + '<span class="sort-arrow"></span>';
+    th.dataset.col = col.key;
+    th.addEventListener('click', () => {
+      if (sortCol === col.key) sortDir = sortDir === 'asc' ? 'desc' : 'asc';
+      else { sortCol = col.key; sortDir = col.key === 'sfr' ? 'asc' : 'desc'; }
+      applyFilterAndSort();
+    });
+    tr.appendChild(th);
+  }
+  resultsThead.appendChild(tr);
+}
+
+function getColumns() {
+  const cols = [
+    { key: 'searchTerm',       label: 'Keyword',                numeric: false },
+    { key: 'sfr',              label: 'SFR',                    numeric: true  },
+    { key: 'estVolume',        label: 'Est. monthly volume ⓘ',  numeric: true  },
+    { key: 'clickPosition',    label: 'Click position',         numeric: true  },
+    { key: 'clickShare',       label: 'Click share %',          numeric: true  },
+    { key: 'conversionShare',  label: 'Conv. share %',          numeric: true  },
+  ];
+  if (multipleAsins) cols.push({ key: 'asin', label: 'Target ASIN', numeric: false });
+  return cols;
+}
+
+function applyFilterAndSort() {
+  const query = filterInput.value.trim().toLowerCase();
+
+  let data = [...parsedResults];
+
+  // Filter
+  if (query) {
+    data = data.filter(r =>
+      r.searchTerm.toLowerCase().includes(query) ||
+      r.asin.toLowerCase().includes(query)
+    );
+  }
+
+  // Sort
+  data.sort((a, b) => {
+    let av, bv;
+    if (sortCol === 'estVolume') {
+      av = a.estVolumeHigh; bv = b.estVolumeHigh;
+    } else {
+      av = a[sortCol]; bv = b[sortCol];
+    }
+    if (typeof av === 'string') av = av.toLowerCase();
+    if (typeof bv === 'string') bv = bv.toLowerCase();
+    if (av < bv) return sortDir === 'asc' ? -1 : 1;
+    if (av > bv) return sortDir === 'asc' ? 1 : -1;
+    return 0;
+  });
+
+  filteredResults = data;
+  currentPage = 0;
+  updateSortArrows();
+  renderSummaryStrip();
+  renderTablePage();
+}
+
+function updateSortArrows() {
+  const ths = resultsThead.querySelectorAll('th');
+  for (const th of ths) {
+    const arrow = th.querySelector('.sort-arrow');
+    if (th.dataset.col === sortCol) {
+      arrow.textContent = sortDir === 'asc' ? ' ▲' : ' ▼';
+    } else {
+      arrow.textContent = '';
+    }
+  }
+}
+
+function renderSummaryStrip() {
+  const total = filteredResults.length;
+  if (total === 0) { summaryStrip.innerHTML = ''; return; }
+
+  const bestSFR  = filteredResults.reduce((m, r) => r.sfr < m ? r.sfr : m, Infinity);
+  const pos1     = filteredResults.filter(r => r.clickPosition === 1).length;
+  const oppCount = filteredResults.filter(r => r.conversionShare > r.clickShare).length;
+
+  summaryStrip.innerHTML = `
+    <div class="summary-stat"><strong>${fmtNum(total)}</strong><small>Keywords found</small></div>
+    <div class="summary-stat"><strong>${fmtNum(bestSFR)}</strong><small>Best SFR (lowest)</small></div>
+    <div class="summary-stat"><strong>${fmtNum(pos1)}</strong><small>#1 click position terms</small></div>
+    <div class="summary-stat opp-badge"><strong>${fmtNum(oppCount)}</strong><small>Ranking opportunities (CVR &gt; CTR)</small></div>
+  `;
+}
+
+function renderTablePage() {
+  const start = 0;
+  const end   = (currentPage + 1) * PAGE_SIZE;
+  const slice = filteredResults.slice(start, end);
+
+  resultsTbody.innerHTML = '';
+
+  if (slice.length === 0) {
+    const tr = document.createElement('tr');
+    const td = document.createElement('td');
+    td.colSpan = getColumns().length;
+    td.className = 'empty-state';
+    if (parsedResults.length === 0) {
+      td.textContent = 'ASIN not found in top 3 clicked ASINs for any search term in this file.';
+    } else {
+      td.textContent = 'No results match your filter.';
+    }
+    tr.appendChild(td);
+    resultsTbody.appendChild(tr);
+    showMoreBtn.style.display = 'none';
+    return;
+  }
+
+  const frag = document.createDocumentFragment();
+  for (const r of slice) {
+    const isOpp = r.conversionShare > r.clickShare;
+    const tr    = document.createElement('tr');
+    if (isOpp) tr.className = 'opp-row';
+
+    tr.appendChild(tdText(r.searchTerm, 'keyword-cell'));
+    tr.appendChild(tdNum(fmtNum(r.sfr)));
+    tr.appendChild(tdNum(fmtVolume(r.estVolumeLow, r.estVolumeHigh)));
+    tr.appendChild(tdBadge(r.clickPosition));
+    tr.appendChild(tdNum(r.clickShare.toFixed(1) + '%'));
+    tr.appendChild(tdNum(r.conversionShare.toFixed(1) + '%'));
+    if (multipleAsins) tr.appendChild(tdText(r.asin));
+
+    frag.appendChild(tr);
+  }
+  resultsTbody.appendChild(frag);
+
+  if (end < filteredResults.length) {
+    const remaining = filteredResults.length - end;
+    showMoreBtn.textContent = `Show more (${fmtNum(Math.min(PAGE_SIZE, remaining))} of ${fmtNum(remaining)} remaining)`;
+    showMoreBtn.style.display = 'block';
+  } else {
+    showMoreBtn.style.display = 'none';
+  }
+}
+
+showMoreBtn.addEventListener('click', () => {
+  currentPage++;
+  const end = (currentPage + 1) * PAGE_SIZE;
+  const slice = filteredResults.slice(0, end);
+  // Append only new rows
+  const frag = document.createDocumentFragment();
+  const prevEnd = currentPage * PAGE_SIZE;
+  const newSlice = filteredResults.slice(prevEnd, end);
+  for (const r of newSlice) {
+    const isOpp = r.conversionShare > r.clickShare;
+    const tr    = document.createElement('tr');
+    if (isOpp) tr.className = 'opp-row';
+    tr.appendChild(tdText(r.searchTerm, 'keyword-cell'));
+    tr.appendChild(tdNum(fmtNum(r.sfr)));
+    tr.appendChild(tdNum(fmtVolume(r.estVolumeLow, r.estVolumeHigh)));
+    tr.appendChild(tdBadge(r.clickPosition));
+    tr.appendChild(tdNum(r.clickShare.toFixed(1) + '%'));
+    tr.appendChild(tdNum(r.conversionShare.toFixed(1) + '%'));
+    if (multipleAsins) tr.appendChild(tdText(r.asin));
+    frag.appendChild(tr);
+  }
+  resultsTbody.appendChild(frag);
+
+  if (end < filteredResults.length) {
+    const remaining = filteredResults.length - end;
+    showMoreBtn.textContent = `Show more (${fmtNum(Math.min(PAGE_SIZE, remaining))} of ${fmtNum(remaining)} remaining)`;
+  } else {
+    showMoreBtn.style.display = 'none';
+  }
+});
+
+// Filter listener
+filterInput.addEventListener('input', () => applyFilterAndSort());
+
+// =============================================================================
+// TD HELPERS
+// =============================================================================
+function tdText(val, cls) {
+  const td = document.createElement('td');
+  if (cls) td.className = cls;
+  td.textContent = val;
+  return td;
+}
+function tdNum(val) {
+  const td = document.createElement('td');
+  td.className = 'num-cell';
+  td.textContent = val;
+  return td;
+}
+function tdBadge(pos) {
+  const td = document.createElement('td');
+  const span = document.createElement('span');
+  span.className = `pos-badge pos-${pos}`;
+  span.textContent = '#' + pos;
+  td.appendChild(span);
+  return td;
+}
+
+// =============================================================================
+// EXPORT CSV
+// =============================================================================
+exportBtn.addEventListener('click', () => {
+  const cols = getColumns();
+  const header = cols.map(c => csvEsc(c.label.replace(' ⓘ', ''))).join(',');
+  const rowLines = filteredResults.map(r => {
+    const cells = [
+      csvEsc(r.searchTerm),
+      r.sfr,
+      `"${fmtK(r.estVolumeLow)}–${fmtK(r.estVolumeHigh)}"`,
+      r.clickPosition,
+      r.clickShare.toFixed(2) + '%',
+      r.conversionShare.toFixed(2) + '%',
+    ];
+    if (multipleAsins) cells.push(csvEsc(r.asin));
+    return cells.join(',');
+  });
+  const csv = [header, ...rowLines].join('\r\n');
+  const blob = new Blob(['\uFEFF' + csv], { type: 'text/csv;charset=utf-8;' });
+  const url  = URL.createObjectURL(blob);
+  const a    = document.createElement('a');
+  a.href = url; a.download = 'keyword-harvest.csv'; a.click();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+});
+
+function csvEsc(v) {
+  v = String(v);
+  if (v.includes(',') || v.includes('"') || v.includes('\n')) return '"' + v.replace(/"/g, '""') + '"';
+  return v;
+}
+
+// =============================================================================
+// CALIBRATION
+// =============================================================================
+function getK() { return parseFloat(document.getElementById('cal-k').value) || K_DEFAULT; }
+function getB() { return parseFloat(document.getElementById('cal-b').value) || B_DEFAULT; }
+
+// =============================================================================
+// UTILITY
+// =============================================================================
+function setProgress(pct, label) {
+  progressFill.style.width = pct + '%';
+  progressText.textContent = label;
+}
+
+function showError(msg) {
+  errorBanner.style.display = 'block';
+  // Format newlines and lists
+  const lines = msg.split('\n').filter(Boolean);
+  if (lines.length === 1) {
+    errorBanner.innerHTML = '⚠️ ' + escHtml(msg);
+  } else {
+    errorBanner.innerHTML = '⚠️ ' + escHtml(lines[0]) + '<ul>' + lines.slice(1).map(l => '<li>' + escHtml(l) + '</li>').join('') + '</ul>';
+  }
+}
+
+function hideError() { errorBanner.style.display = 'none'; }
+
+function escHtml(s) {
+  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+function formatBytes(b) {
+  if (b > 1_000_000) return (b/1_048_576).toFixed(1) + ' MB';
+  if (b > 1000)      return (b/1024).toFixed(0) + ' KB';
+  return b + ' B';
+}
+
+function fmtNum(n) {
+  if (n === undefined || n === null) return '';
+  return n.toLocaleString('en-US');
+}
+
+function fmtK(n) {
+  if (n >= 1_000_000) return (n/1_000_000).toFixed(1) + 'M';
+  if (n >= 1_000)     return Math.round(n/1_000) + 'K';
+  return String(n);
+}
+
+function fmtVolume(lo, hi) {
+  return fmtK(lo) + '–' + fmtK(hi);
+}
+
+// Init
+renderAsinTags();
+</script>
+</body>
+</html>
