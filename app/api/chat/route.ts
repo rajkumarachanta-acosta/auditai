@@ -107,7 +107,7 @@ export async function POST(req: NextRequest) {
           { role: "user",   content: payload },
         ],
         temperature: 0,            // deterministic — no drift, no invented numbers
-        max_tokens: 700,
+        max_tokens: 1000,
         top_p: 1,
       }),
     });

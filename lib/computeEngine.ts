@@ -97,7 +97,7 @@ export function computeAnswer(audit: AuditResult, question: string): ComputedAns
     campaigns:      score(q, [/campaign/i, /ad.?group/i]),
     asins:          score(q, [/\basin\b/i, /\basins\b/i, /product/i, /item/i, /\bsku\b/i]),
     keywords:       score(q, [/keyword/i, /\bbid\b/i, /\bkw\b/i, /match.?type/i]),
-    score:          score(q, [/\bscore\b/i, /health/i, /grade/i, /why.*low/i, /improve.*score/i, /dragging/i, /accurate/i]),
+    score:          score(q, [/\bscore\b/i, /health/i, /grade/i, /why.*low/i, /improve.*score/i, /dragging/i, /accurate/i, /redesign.*score/i, /recalcul.*score/i, /update.*score/i]),
     opportunities:  score(q, [/opportunit/i, /grow/i, /scale/i, /upside/i, /potential/i, /increase/i, /expand/i]),
     revenue:        score(q, [/revenue/i, /\bsales\b/i, /earning/i, /income/i, /how.*much.*mak/i]),
     spend:          score(q, [/spend/i, /cost/i, /\bcpc\b/i, /how.*much.*pay/i]),
@@ -169,31 +169,52 @@ export function computeAnswer(audit: AuditResult, question: string): ComputedAns
 
   if (topIntent[1] === 0) return computeSummary(audit); // nothing matched → summary
 
+  let result: ComputedAnswer;
   switch (topIntent[0]) {
-    case "searchTerms":   return computeSearchTerms(audit, q, limit);
-    case "zeroConversion": return computeZeroConversionAsins(audit, limit);
-    case "waste":         return isCampaignFocus ? computeWasteCampaigns(audit, limit) : computeWasteOverall(audit);
-    case "highAcos":      return isCampaignFocus ? computeHighAcosCampaigns(audit, limit) : computeHighAcosAsins(audit, limit);
-    case "lowCvr":        return isCampaignFocus ? computeLowCvrCampaigns(audit, limit) : computeLowCvrAsins(audit, limit);
-    case "highCvr":       return isCampaignFocus ? computeHighCvrCampaigns(audit, limit) : computeHighCvrAsins(audit, limit);
-    case "highReturn":    return computeHighReturnAsins(audit, limit);
-    case "campaigns":     return computeCampaignOverview(audit, limit);
-    case "asins":         return computeAsinOverview(audit, limit);
-    case "keywords":      return computeKeywords(audit, q, limit);
-    case "score":         return computeScoreAnalysis(audit);
-    case "opportunities": return computeOpportunities(audit, limit);
-    case "revenue":       return computeRevenue(audit);
-    case "spend":         return computeSpend(audit);
-    case "returns":       return computeReturns(audit, limit);
-    case "ctr":           return computeCtr(audit, limit);
-    case "cvr":           return computeCvr(audit, limit);
-    case "impressions":   return computeImpressions(audit);
-    case "brands":        return computeBrands(audit);
-    case "compare":       return computeCompare(audit);
-    case "datainfo":      return computeDataInfo(audit);
+    case "searchTerms":    result = computeSearchTerms(audit, q, limit); break;
+    case "zeroConversion": result = computeZeroConversionAsins(audit, limit); break;
+    case "waste":          result = isCampaignFocus ? computeWasteCampaigns(audit, limit) : computeWasteOverall(audit); break;
+    case "highAcos":       result = isCampaignFocus ? computeHighAcosCampaigns(audit, limit) : computeHighAcosAsins(audit, limit); break;
+    case "lowCvr":         result = isCampaignFocus ? computeLowCvrCampaigns(audit, limit) : computeLowCvrAsins(audit, limit); break;
+    case "highCvr":        result = isCampaignFocus ? computeHighCvrCampaigns(audit, limit) : computeHighCvrAsins(audit, limit); break;
+    case "highReturn":     result = computeHighReturnAsins(audit, limit); break;
+    case "campaigns":      result = computeCampaignOverview(audit, limit); break;
+    case "asins":          result = computeAsinOverview(audit, limit); break;
+    case "keywords":       result = computeKeywords(audit, q, limit); break;
+    case "score":          result = computeScoreAnalysis(audit); break;
+    case "opportunities":  result = computeOpportunities(audit, limit); break;
+    case "revenue":        result = computeRevenue(audit); break;
+    case "spend":          result = computeSpend(audit); break;
+    case "returns":        result = computeReturns(audit, limit); break;
+    case "ctr":            result = computeCtr(audit, limit); break;
+    case "cvr":            result = computeCvr(audit, limit); break;
+    case "impressions":    result = computeImpressions(audit); break;
+    case "brands":         result = computeBrands(audit); break;
+    case "compare":        result = computeCompare(audit); break;
+    case "datainfo":       result = computeDataInfo(audit); break;
     case "summary":
-    default:              return computeSummary(audit);
+    default:               result = computeSummary(audit); break;
   }
+
+  // ── Secondary intent: if question ALSO mentions score/redesign score,
+  //    append the score facts so GPT addresses both halves of the question ──
+  if (topIntent[0] !== "score" && scores.score > 0) {
+    const scoreCtx = computeScoreAnalysis(audit);
+    result = {
+      ...result,
+      facts: [
+        ...result.facts,
+        `--- ALSO: score context ---`,
+        ...scoreCtx.facts,
+      ],
+      nextSteps: [
+        ...result.nextSteps,
+        ...scoreCtx.nextSteps,
+      ],
+    };
+  }
+
+  return result;
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
