@@ -279,128 +279,190 @@ const WORKER_SRC = `
 // ---- CSV chunk reader -------------------------------------------------------
 // Streams the file in 4MB slices, accumulates a line buffer, emits parsed rows.
 
-const CHUNK_SIZE = 4 * 1024 * 1024; // 4 MB
+// ── Tuning constants ─────────────────────────────────────────────────────────
+// 16 MB chunks: fewer loop iterations over a 2 GB file (125 vs 512 for 4 MB).
+// Large enough that decode overhead is negligible; small enough to stay
+// well below the 2 GB ArrayBuffer limit and avoid single-chunk GC pauses.
+const CHUNK_SIZE     = 16 * 1024 * 1024; // 16 MB
+// First-pass header scan reads only this much — column map is built cheaply
+// before we start streaming the bulk of the file.
+const HEADER_SCAN_SZ = 64 * 1024;        // 64 KB
 
 self.onmessage = async function(e) {
   const { file, targetAsins: targetAsinsArr, K, b } = e.data;
-  // targetAsins is sent as an Array (Sets are not structuredClone-safe across all browsers)
   const targetAsins = new Set((targetAsinsArr || []).map(a => a.toUpperCase()));
+  const isPreflight = targetAsins.has('__PREFLIGHT__');
 
-  // ── 1. Read & parse the entire CSV in chunks ─────────────────────────────
   const totalSize = file.size;
-  let offset = 0;
-  let lineBuffer = '';
-  let headerRow = null;
-  let colMap = null;        // { sfr, term, asins: [{asin,cs,cvs}] } → column indices
-  let rows = [];            // lightweight: store only what we need
-  let totalRowsParsed = 0;
+  const decoder   = new TextDecoder('utf-8');
+
+  // ── Phase 1: scan first 64 KB to detect header + date range ─────────────
+  // Avoids reading 2 GB just to find column positions.
+  let colMap       = null;
   let detectedRange = null;
-  let lastProgressSent = Date.now();
-
-  const decoder = new TextDecoder('utf-8');
-
-  while (offset < totalSize) {
-    const slice = file.slice(offset, offset + CHUNK_SIZE);
-    const arrayBuf = await slice.arrayBuffer();
-    const text = decoder.decode(arrayBuf, { stream: true });
-    lineBuffer += text;
-    offset += CHUNK_SIZE;
-
-    // Process complete lines (keep trailing partial)
-    let lastNL = lineBuffer.lastIndexOf('\\n');
-    if (lastNL === -1 && offset < totalSize) continue; // no full line yet
-    const chunk = lastNL === -1 ? lineBuffer : lineBuffer.slice(0, lastNL + 1);
-    lineBuffer = lastNL === -1 ? '' : lineBuffer.slice(lastNL + 1);
-
-    const lines = chunk.split('\\n');
-    for (const rawLine of lines) {
-      const line = rawLine.replace(/\\r$/, '');
-      if (!line.trim()) continue;
-
-      // ── header detection ─────────────────────────────────────────────────
-      if (!headerRow) {
-        const lc = line.toLowerCase();
-        // Detect date-range from metadata rows before header
-        if (!detectedRange && (lc.includes('report') || lc.includes('week') || lc.includes('period'))) {
-          const m = line.match(/\\d{4}-\\d{2}-\\d{2}/g);
-          if (m && m.length >= 1) detectedRange = m.join(' – ');
-        }
-        if (lc.includes('search frequency')) {
-          headerRow = parseCSVLine(line);
-          colMap = buildColMap(headerRow);
-          if (colMap.error) {
-            self.postMessage({ type: 'error', message: colMap.error });
-            return;
-          }
-        }
-        continue;
+  {
+    const scanSize = Math.min(HEADER_SCAN_SZ, totalSize);
+    const scanBuf  = await file.slice(0, scanSize).arrayBuffer();
+    const scanText = decoder.decode(scanBuf);
+    // Reset decoder state — we'll re-decode from byte 0 in Phase 2.
+    // (TextDecoder is stateful for multi-byte chars; we create a fresh one below.)
+    const scanLines = scanText.split('\\n');
+    for (const rawLine of scanLines) {
+      const line = rawLine.replace(/\\r$/, '').trim();
+      if (!line) continue;
+      const lc = line.toLowerCase();
+      if (!detectedRange && (lc.includes('report') || lc.includes('week') || lc.includes('period'))) {
+        const m = line.match(/\\d{4}-\\d{2}-\\d{2}/g);
+        if (m && m.length >= 1) detectedRange = m.join(' – ');
       }
-
-      // ── data row ─────────────────────────────────────────────────────────
-      const cells = parseCSVLine(line);
-      if (cells.length < 4) continue;
-
-      const termRaw   = cells[colMap.term]  || '';
-      const sfrRaw    = cells[colMap.sfr]   || '';
-      const term      = termRaw.trim();
-      const sfr       = parseInt(sfrRaw.replace(/,/g, ''), 10);
-      if (!term || isNaN(sfr)) continue;
-
-      // Check each position
-      for (const pos of colMap.positions) {
-        const asinVal = (cells[pos.asinIdx] || '').trim().toUpperCase();
-        if (!asinVal) continue;
-        if (!targetAsins.has(asinVal)) continue;
-
-        const cs  = parsePercent(cells[pos.csIdx]  || '0');
-        const cvs = parsePercent(cells[pos.cvsIdx] || '0');
-
-        rows.push({ asin: asinVal, searchTerm: term, sfr, clickPosition: pos.num, clickShare: cs, conversionShare: cvs });
+      if (lc.includes('search frequency')) {
+        const headers = parseCSVLine(line);
+        colMap = buildColMap(headers);
+        if (colMap.error) {
+          self.postMessage({ type: 'error', message: colMap.error });
+          return;
+        }
+        break;
       }
-
-      totalRowsParsed++;
     }
-
-    // ── progress reporting ────────────────────────────────────────────────
-    const now = Date.now();
-    if (now - lastProgressSent >= 200 || offset >= totalSize) {
-      self.postMessage({ type: 'progress', pct: Math.min(99, Math.round(offset / totalSize * 100)), rows: totalRowsParsed });
-      lastProgressSent = now;
+    if (!colMap) {
+      self.postMessage({ type: 'error', message: 'Could not detect a header row containing "Search Frequency Rank" in the first 64 KB. Please verify this is a Brand Analytics Top Search Terms export.' });
+      return;
     }
   }
 
-  // flush remaining line buffer
-  if (lineBuffer.trim() && headerRow) {
-    const cells = parseCSVLine(lineBuffer.trim());
-    if (cells.length >= 4) {
-      const termRaw   = cells[colMap.term]  || '';
-      const sfrRaw    = cells[colMap.sfr]   || '';
-      const term      = termRaw.trim();
-      const sfr       = parseInt(sfrRaw.replace(/,/g, ''), 10);
-      if (term && !isNaN(sfr)) {
-        for (const pos of colMap.positions) {
-          const asinVal = (cells[pos.asinIdx] || '').trim().toUpperCase();
-          if (!asinVal) continue;
-          if (!targetAsins.has(asinVal)) continue;
-          const cs  = parsePercent(cells[pos.csIdx]  || '0');
-          const cvs = parsePercent(cells[pos.cvsIdx] || '0');
-          rows.push({ asin: asinVal, searchTerm: term, sfr, clickPosition: pos.num, clickShare: cs, conversionShare: cvs });
-        }
-        totalRowsParsed++;
-      }
-    }
-  }
-
-  if (!headerRow) {
-    self.postMessage({ type: 'error', message: 'Could not detect a header row containing "Search Frequency Rank". Please verify this is a Brand Analytics Top Search Terms export.' });
+  // For preflight we only need structure validation — skip the 2 GB data scan.
+  // We send back a dummy totalRows; the UI will show "File validated" not a row count.
+  if (isPreflight) {
+    self.postMessage({ type: 'done', results: [], totalRows: 0, detectedRange, preflightOnly: true });
     return;
   }
 
-  // ── 2. Add volume estimates ───────────────────────────────────────────────
-  for (const r of rows) {
-    const est = K * Math.pow(r.sfr, -b);
-    r.estVolumeLow  = Math.round(est * 0.6);
-    r.estVolumeHigh = Math.round(est * 1.4);
+  // ── Phase 2: stream full file, match ASINs, emit results inline ──────────
+  // Fresh decoder for the actual streaming pass.
+  const streamDecoder = new TextDecoder('utf-8');
+  let   tail          = '';        // incomplete line carried between chunks
+  let   headerSkipped = false;     // true once we've consumed the header row
+  const rows          = [];
+  let   totalRowsParsed = 0;
+  let   lastProgressAt  = Date.now();
+  let   offset          = 0;
+
+  while (offset < totalSize) {
+    const slice   = file.slice(offset, offset + CHUNK_SIZE);
+    const buf     = await slice.arrayBuffer();
+    // stream:true keeps multi-byte char state across chunks
+    const text    = streamDecoder.decode(buf, { stream: offset + CHUNK_SIZE < totalSize });
+    offset       += CHUNK_SIZE;
+
+    // Append to tail and find last newline so we never split mid-line
+    const combined = tail + text;
+    const lastNL   = combined.lastIndexOf('\\n');
+
+    // If no newline yet and more data coming, buffer it
+    if (lastNL === -1 && offset < totalSize) { tail = combined; continue; }
+
+    const block = lastNL === -1 ? combined : combined.slice(0, lastNL);
+    tail        = lastNL === -1 ? ''       : combined.slice(lastNL + 1);
+
+    // Process every line in this block without a full .split() allocation:
+    // walk character-by-character tracking line start positions.
+    let lineStart = 0;
+    for (let i = 0; i <= block.length; i++) {
+      if (i === block.length || block[i] === '\\n') {
+        // Extract one line
+        const end  = (i > 0 && block[i - 1] === '\\r') ? i - 1 : i;
+        const line = block.slice(lineStart, end);
+        lineStart  = i + 1;
+
+        if (!line) continue;
+
+        // Skip header row (we already parsed it in Phase 1)
+        if (!headerSkipped) {
+          if (line.toLowerCase().includes('search frequency')) headerSkipped = true;
+          continue;
+        }
+
+        // ── hot path: parse only what we need ──────────────────────────────
+        const cells = parseCSVLine(line);
+        if (cells.length < 4) continue;
+
+        const termRaw = cells[colMap.term] || '';
+        const sfrRaw  = cells[colMap.sfr]  || '';
+        const term    = termRaw.trim();
+        const sfr     = parseInt(sfrRaw.replace(/,/g, ''), 10);
+        if (!term || isNaN(sfr) || sfr <= 0) continue;
+
+        totalRowsParsed++;
+
+        // Quick early-exit: check any target ASIN appears before doing full work
+        let anyMatch = false;
+        for (const pos of colMap.positions) {
+          if (targetAsins.has((cells[pos.asinIdx] || '').trim().toUpperCase())) {
+            anyMatch = true; break;
+          }
+        }
+        if (!anyMatch) continue;
+
+        // Compute volume estimate inline — no second pass needed
+        const est   = K * Math.pow(sfr, -b);
+        const estLo = Math.round(est * 0.6);
+        const estHi = Math.round(est * 1.4);
+
+        for (const pos of colMap.positions) {
+          const asinVal = (cells[pos.asinIdx] || '').trim().toUpperCase();
+          if (!asinVal || !targetAsins.has(asinVal)) continue;
+          rows.push({
+            asin: asinVal,
+            searchTerm: term,
+            sfr,
+            clickPosition: pos.num,
+            clickShare:       parsePercent(cells[pos.csIdx]  || '0'),
+            conversionShare:  parsePercent(cells[pos.cvsIdx] || '0'),
+            estVolumeLow:  estLo,
+            estVolumeHigh: estHi,
+          });
+        }
+      }
+    }
+
+    // ── progress — throttled to avoid postMessage flood ───────────────────
+    const now = Date.now();
+    if (now - lastProgressAt >= 250 || offset >= totalSize) {
+      self.postMessage({
+        type: 'progress',
+        pct:  Math.min(99, Math.round(offset / totalSize * 100)),
+        rows: totalRowsParsed,
+      });
+      lastProgressAt = now;
+    }
+  }
+
+  // Flush final partial line if any
+  if (tail.trim() && headerSkipped) {
+    const line  = tail.replace(/\\r$/, '').trim();
+    const cells = parseCSVLine(line);
+    if (cells.length >= 4) {
+      const term = (cells[colMap.term] || '').trim();
+      const sfr  = parseInt((cells[colMap.sfr] || '').replace(/,/g, ''), 10);
+      if (term && !isNaN(sfr) && sfr > 0) {
+        totalRowsParsed++;
+        const est   = K * Math.pow(sfr, -b);
+        const estLo = Math.round(est * 0.6);
+        const estHi = Math.round(est * 1.4);
+        for (const pos of colMap.positions) {
+          const asinVal = (cells[pos.asinIdx] || '').trim().toUpperCase();
+          if (!asinVal || !targetAsins.has(asinVal)) continue;
+          rows.push({
+            asin: asinVal, searchTerm: term, sfr,
+            clickPosition: pos.num,
+            clickShare:      parsePercent(cells[pos.csIdx]  || '0'),
+            conversionShare: parsePercent(cells[pos.cvsIdx] || '0'),
+            estVolumeLow: estLo, estVolumeHigh: estHi,
+          });
+        }
+      }
+    }
   }
 
   self.postMessage({ type: 'done', results: rows, totalRows: totalRowsParsed, detectedRange });
@@ -637,29 +699,27 @@ function handleFile(file) {
 
   const w = new Worker(workerBlobUrl);
 
-  // We'll pass an empty set for ASINs during pre-parse — worker only matches
-  // ASINs during the lookup phase. But for the parse phase we want to count rows.
-  // Solution: pass null targetAsins, worker counts rows but emits no result records.
-  // Actually, architecture-wise it's simpler to re-run on "Run" click with real ASINs
-  // since a 200MB file re-parse in worker is still < 5s.
-  // Pre-parse: just validate the file structure & count rows.
-  // Sets are not safely structuredClone'd across all browsers; send as Array
+  // Preflight: worker reads only the first 64 KB to validate columns + detect date range.
+  // At 2 GB this is ~instantaneous vs a full-file scan.
   w.postMessage({ file, targetAsins: ['__PREFLIGHT__'], K: getK(), b: getB() });
 
   w.onmessage = (ev) => {
     const msg = ev.data;
     if (msg.type === 'progress') {
-      setProgress(msg.pct, `Parsing… ${fmtNum(msg.rows)} rows`);
+      // Preflight exits before Phase 2, so this should rarely fire
+      setProgress(msg.pct, 'Validating…');
     } else if (msg.type === 'error') {
       showError(msg.message);
+      progressWrap.style.display = 'none';
       w.terminate();
     } else if (msg.type === 'done') {
-      totalRowsInFile = msg.totalRows;
-      detectedRange   = msg.detectedRange;
+      detectedRange = msg.detectedRange;
       setProgress(100, 'Done');
       progressWrap.style.display = 'none';
       const rangeStr = detectedRange ? ` · week of ${detectedRange}` : '';
-      parseSummary.textContent = `Parsed ${fmtNum(totalRowsInFile)} search terms${rangeStr}`;
+      // At 2 GB we can't count rows cheaply — show file size instead
+      const sizeStr  = formatBytes(file.size);
+      parseSummary.textContent = `File validated (${sizeStr})${rangeStr} — ready to search`;
       parseSummary.style.display = 'block';
       fileReady = true;
       checkRunReady();
@@ -669,6 +729,7 @@ function handleFile(file) {
 
   w.onerror = (err) => {
     showError('Worker error: ' + (err.message || 'Unknown'));
+    progressWrap.style.display = 'none';
     w.terminate();
   };
 }
@@ -684,8 +745,15 @@ runBtn.addEventListener('click', () => {
   multipleAsins = valid.length > 1;
 
   runBtn.disabled = true;
-  runBtn.textContent = 'Running…';
+  runBtn.textContent = 'Starting…';
   resultsSection.style.display = 'none';
+
+  // Show the scan progress bar while the worker streams 2 GB
+  fileInfoEl.style.display = 'block';
+  progressWrap.style.display = 'block';
+  parseSummary.style.display = 'none';
+  setProgress(0, 'Scanning…');
+  const scanStart = Date.now();
 
   const w = new Worker(workerBlobUrl);
   w.postMessage({ file: loadedFile, targetAsins: valid, K: getK(), b: getB() });
@@ -693,13 +761,20 @@ runBtn.addEventListener('click', () => {
   w.onmessage = (ev) => {
     const msg = ev.data;
     if (msg.type === 'progress') {
-      runBtn.textContent = `Running… ${msg.pct}%`;
+      const elapsed = ((Date.now() - scanStart) / 1000).toFixed(0);
+      setProgress(msg.pct, `Scanning… ${msg.pct}% · ${fmtNum(msg.rows)} rows · ${elapsed}s`);
+      runBtn.textContent = `Scanning… ${msg.pct}%`;
     } else if (msg.type === 'error') {
       showError(msg.message);
+      progressWrap.style.display = 'none';
       runBtn.disabled = false;
       runBtn.textContent = 'Run Reverse-ASIN Lookup';
       w.terminate();
     } else if (msg.type === 'done') {
+      const elapsed = ((Date.now() - scanStart) / 1000).toFixed(1);
+      progressWrap.style.display = 'none';
+      parseSummary.textContent = `Scanned ${fmtNum(msg.totalRows)} rows · found ${fmtNum(msg.results.length)} matches · ${elapsed}s`;
+      parseSummary.style.display = 'block';
       parsedResults = msg.results;
       runBtn.disabled = false;
       runBtn.textContent = 'Run Reverse-ASIN Lookup';
@@ -711,6 +786,7 @@ runBtn.addEventListener('click', () => {
 
   w.onerror = (err) => {
     showError('Worker error: ' + (err.message || 'Unknown'));
+    progressWrap.style.display = 'none';
     runBtn.disabled = false;
     runBtn.textContent = 'Run Reverse-ASIN Lookup';
     w.terminate();
