@@ -60,157 +60,214 @@ function score(q: string, patterns: RegExp[]): number {
 
 // ── Main compute function ──
 export function computeAnswer(audit: AuditResult, question: string): ComputedAnswer {
-  const q = question.toLowerCase();
+  const q = question.toLowerCase().trim();
   const limit = extractN(q);
 
-  // ── Greetings / meta questions — handle before data routing ──
-  if (/^(hi|hello|hey|what is your name|who are you|what are you|what can you do|help)/i.test(q.trim())) {
-    const { summary, score, scoreLabel, totalWaste } = audit;
+  // ── 1. GREETING ──────────────────────────────────────────────────────────────
+  if (/^(hi|hello|hey|yo|sup|what is your name|who are you|what are you|what can you do|help\b)/i.test(q)) {
+    const { summary, score: sc, scoreLabel, totalWaste } = audit;
     return {
       intent: "greeting",
-      headline: `I'm AuditAI — your Amazon advertising analyst`,
+      headline: `I'm AuditAI — your Amazon advertising expert`,
       facts: [
-        `I've analyzed your account: ${summary.campaignCount} campaigns, ${summary.keywordCount} keywords, ${summary.asinCount} ASINs`,
-        `Health score: ${score}/100 (${scoreLabel})`,
-        `Total waste identified: $${totalWaste.toFixed(0)}`,
-        `You can ask me anything about your campaigns, keywords, ASINs, spend, revenue, returns, or get a full action plan`,
+        `Account analyzed: ${summary.campaignCount} campaigns, ${summary.keywordCount} keywords, ${summary.asinCount} ASINs`,
+        `Health score: ${sc}/100 (${scoreLabel})`,
+        `Identified waste: $${totalWaste.toFixed(0)} recoverable`,
+        `Ask me about campaigns, keywords, ASINs, search terms, spend, ACOS, CVR, CTR, returns, TACOS, match types, negatives, harvest list, or get a full action plan`,
       ],
       data: null,
       nextSteps: [
         `Try: "What should I fix first?"`,
-        `Try: "Show me top 10 keywords wasting budget"`,
-        `Try: "Which campaigns have high ACOS?"`,
+        `Try: "Which keywords are killing my ACOS?"`,
+        `Try: "Show me my harvest list"`,
+        `Try: "Which campaigns should I pause today?"`,
       ],
       hasData: true,
     };
   }
 
-  // ── Score every possible intent ──
-  const scores = {
-    searchTerms:    score(q, [/search.?term/i, /customer.?quer/i, /actual.?quer/i, /search.?quer/i, /what.*customer.*search/i, /customer.*search/i]),
-    zeroConversion: score(q, [/(zero|no|not?)\s*(convers|order|sale|purchas)/i, /spend.*(no|without|never).*(sale|order|convers)/i, /paying.*nothing/i, /dead.*spend/i, /ad.*spend.*no.*order/i, /no.*order.*ad/i, /burn.*no.*conver/i]),
-    waste:          score(q, [/wast/i, /burn/i, /bleed/i, /zero.?sal/i, /no.?sal/i, /money.*drain/i, /losing/i, /inefficien/i]),
-    highAcos:       score(q, [/high.*acos/i, /acos.*high/i, /acos.*above/i, /expensive/i, /overspend/i, /acos/i]),
-    lowCvr:         score(q, [/low.*cvr/i, /cvr.*low/i, /poor.*convers/i, /not.*convert/i, /bad.*convers/i]),
-    highCvr:        score(q, [/high.*cvr/i, /cvr.*high/i, /best.*convers/i, /top.*convers/i, /convert.*well/i, /converting.?well/i, /best.*performing/i]),
-    highReturn:     score(q, [/high.*return/i, /return.*high/i, /return.*rate/i, /refund/i, /sent.*back/i]),
-    campaigns:      score(q, [/campaign/i, /ad.?group/i]),
-    asins:          score(q, [/\basin\b/i, /\basins\b/i, /product/i, /item/i, /\bsku\b/i]),
-    keywords:       score(q, [/keyword/i, /\bbid\b/i, /\bkw\b/i, /match.?type/i]),
-    score:          score(q, [/\bscore\b/i, /health/i, /grade/i, /why.*low/i, /improve.*score/i, /dragging/i, /accurate/i, /redesign.*score/i, /recalcul.*score/i, /update.*score/i]),
-    opportunities:  score(q, [/opportunit/i, /grow/i, /scale/i, /upside/i, /potential/i, /increase/i, /expand/i]),
-    revenue:        score(q, [/revenue/i, /\bsales\b/i, /earning/i, /income/i, /how.*much.*mak/i]),
-    spend:          score(q, [/spend/i, /cost/i, /\bcpc\b/i, /how.*much.*pay/i]),
-    returns:        score(q, [/return/i, /refund/i, /sent.*back/i]),
-    ctr:            score(q, [/\bctr\b/i, /click.?through/i, /click.?rate/i]),
-    cvr:            score(q, [/\bcvr\b/i, /conversion.?rate/i]),
-    impressions:    score(q, [/impression/i, /visibility/i, /reach/i, /page.?view/i]),
-    brands:         score(q, [/brand/i]),
-    compare:        score(q, [/compar/i, /\bvs\b/i, /versus/i, /best.*vs.*worst/i, /differ/i]),
-    priority:       score(q, [/first/i, /priority/i, /most.*import/i, /what.*should.*i/i, /where.*start/i, /top.*action/i]),
-    summary:        score(q, [/summary/i, /overview/i, /snapshot/i, /how.*doing/i, /overall/i, /status/i]),
-    datainfo:       score(q, [/how.*many.*day/i, /date.*range/i, /period/i, /how.*long/i, /uploaded/i, /what.*data/i]),
-    powerpoint:     score(q, [/powerpoint/i, /pptx/i, /slide/i, /presentat/i]),
-  };
-
-  // ── Search terms beat keywords (different data source) ──
-  const isSearchTermFocus = scores.searchTerms > 0;
-  // Keyword: only when search term NOT mentioned
-  const isKeywordFocus  = !isSearchTermFocus && scores.keywords > 0;
-  // Campaign focus: explicit campaign mention, NOT overridden by keyword or search term
-  const isCampaignFocus = !isSearchTermFocus && !isKeywordFocus && (scores.campaigns > 0 || (scores.asins === 0 && (scores.highAcos > 0 || scores.waste > 0 || scores.ctr > 0)));
-  // ASIN focus: explicit ASIN mention, NOT overridden by keyword or campaign
-  const isAsinFocus     = !isKeywordFocus && !isSearchTermFocus && (scores.asins > 0 || scores.highReturn > 0 || (scores.revenue > 0 && scores.campaigns === 0));
-  // Complex = two filters at once (mutually compatible ones only — fixes B3)
-  const isComplexFilter = (scores.highReturn > 0 && scores.highCvr > 0) ||
-                          (scores.highAcos > 0 && scores.lowCvr > 0) ||
-                          (scores.lowCvr > 0 && scores.highReturn > 0) ||
-                          (scores.waste > 0 && scores.campaigns > 0);
-
-  // ── PowerPoint ──
-  if (scores.powerpoint > 0) {
+  // ── 2. POWERPOINT ─────────────────────────────────────────────────────────────
+  if (/powerpoint|pptx|\bslide|\bdeck\b|presentat|export.*ppt|ppt.*export/i.test(q)) {
     return { intent: "powerpoint", headline: "PowerPoint export", facts: [], data: null, nextSteps: [], hasData: false };
   }
 
-  // ── Search terms — highest specificity ──
-  if (isSearchTermFocus) {
-    return computeSearchTerms(audit, q, limit);
+  // ── 3. SPECIFIC ENTITY LOOKUP — user mentions a specific ASIN, campaign, or keyword name ──
+  // e.g. "what's going on with B0D511BPK2", "tell me about the dickies campaign"
+  const asinMatch = q.match(/\b(b0[a-z0-9]{8}|b[0-9][a-z0-9]{8})\b/i);
+  if (asinMatch) {
+    const asin = asinMatch[1].toUpperCase();
+    return computeSpecificAsin(audit, asin, q);
   }
 
-  // ── Zero conversion ──
-  if (scores.zeroConversion > 0) {
+  // ── 4. WEIGHTED INTENT SCORING ────────────────────────────────────────────────
+  // Each intent has patterns with individual weights. Highest weighted score wins.
+  // This replaces the flat regex counting with a priority-aware system.
+
+  const W = (patterns: [RegExp, number][]): number =>
+    patterns.reduce((s, [p, w]) => s + (p.test(q) ? w : 0), 0);
+
+  const intents = {
+    // ── Meta ──
+    priority:       W([[/what.*should.*i.*(do|fix|change|prioriti|start)/i,10],[/what.*first/i,10],[/quick.*win/i,9],[/biggest.*problem/i,9],[/most.*import/i,8],[/where.*start/i,8],[/top.*action/i,7],[/\bpriority\b/i,6],[/kill.*list/i,8],[/pause.*list/i,8],[/what.*kill.*(today|now)/i,10]]),
+    summary:        W([[/\boverview\b/i,8],[/\bsummary\b/i,8],[/\bsnapshot\b/i,8],[/how.*\b(doing|healthy|performing)\b/i,8],[/\boverall\b/i,6],[/\bstatus\b/i,6],[/tl;?dr/i,9],[/health.*check/i,9],[/account.*performance/i,8],[/give.*overview/i,8]]),
+    datainfo:       W([[/how many days/i,9],[/date range/i,9],[/reporting period/i,9],[/what data/i,8],[/what.*upload/i,8],[/which report/i,8],[/how long/i,6]]),
+    scoreAnalysis:  W([[/\bscore\b/i,7],[/health.*score/i,9],[/why.*\b(low|bad|poor)\b/i,7],[/improve.*score/i,9],[/\bgrade\b/i,7],[/dragging.*score/i,9],[/redesign.*score/i,9],[/recalculate.*score/i,9],[/update.*score/i,9],[/what.*score.*mean/i,8]]),
+
+    // ── Waste / Kill ──
+    killList:       W([[/kill.*list/i,12],[/pause.*list/i,12],[/what.*pause.*(today|now|immediately)/i,12],[/what.*shut.*down/i,11],[/campaigns.*to.*pause/i,11],[/should.*i.*pause/i,10],[/which.*pause/i,9],[/what.*kill/i,10]]),
+    zeroConversion: W([[/(zero|no)\s*(convers|order)/i,10],[/spend.*no.*sale/i,10],[/no.*sales.*spend/i,10],[/ad.*spend.*no.*order/i,10],[/paying.*nothing/i,10],[/dead.*spend/i,10],[/burn.*no.*conver/i,9],[/wast.*ad.*spend/i,8],[/bleed.*budget/i,8]]),
+    wasteOverall:   W([[/\bwaste\b/i,8],[/\bburn(ing)?\b/i,7],[/\bbleed(ing)?\b/i,7],[/money.*drain/i,9],[/losing.*money/i,8],[/inefficien/i,7],[/where.*money.*going/i,10],[/where.*budget.*going/i,10],[/hemorrhag/i,8]]),
+
+    // ── ACOS / Efficiency ──
+    highAcos:       W([[/high.*acos/i,9],[/acos.*high/i,9],[/acos.*above/i,8],[/acos.*over/i,8],[/\bacos\b/i,6],[/\btacos\b/i,7],[/total.*acos/i,9],[/blended.*acos/i,9],[/overspend/i,6],[/too.*expensive/i,7],[/killing.*acos/i,10],[/acos.*killing/i,10],[/what.*acos/i,7]]),
+
+    // ── CVR ──
+    lowCvr:         W([[/low.*cvr/i,9],[/cvr.*low/i,9],[/poor.*convers/i,8],[/not.*convert/i,8],[/bad.*convers/i,8],[/click.*no.*buy/i,10],[/getting.*click.*not.*order/i,10],[/click.*not.*convert/i,10],[/weak.*convers/i,8]]),
+    highCvr:        W([[/high.*cvr/i,9],[/cvr.*high/i,9],[/best.*convers/i,8],[/top.*convers/i,8],[/convert.*well/i,8],[/converting.*well/i,8],[/best.*performing/i,7],[/winning.*product/i,8],[/cash.*cow/i,8],[/scale.*product/i,8]]),
+
+    // ── Returns ──
+    highReturn:     W([[/high.*return/i,9],[/return.*rate/i,9],[/return.*problem/i,9],[/\brefund/i,8],[/sent.*back/i,8],[/coming.*back/i,7],[/return.*issue/i,9],[/too.*many.*return/i,10],[/return.*killing/i,10]]),
+
+    // ── Keywords / Bids ──
+    keywords:       W([[/\bkeyword/i,8],[/\bbid\b/i,7],[/\bbids\b/i,7],[/match.*type/i,9],[/\bexact\b.*match/i,9],[/\bbroad\b.*match/i,9],[/\bphrase\b.*match/i,9],[/\bnegative/i,9],[/bid.*strategy/i,9],[/\bkw\b/i,7],[/under.*bid/i,9],[/overbid/i,9],[/raise.*bid/i,8],[/lower.*bid/i,8],[/bid.*headroom/i,10],[/bid.*too.*low/i,9],[/bid.*too.*high/i,9]]),
+    negatives:      W([[/\bnegative/i,10],[/add.*negative/i,11],[/negative.*keyword/i,11],[/block.*keyword/i,10],[/irrelevant.*search/i,10],[/negative.*gap/i,11],[/missing.*negative/i,11]]),
+    matchType:      W([[/match.*type/i,10],[/match.*strateg/i,10],[/broad.*vs.*exact/i,11],[/exact.*vs.*broad/i,11],[/phrase.*match/i,9],[/broad.*match/i,9],[/match.*mix/i,10],[/match.*breakdown/i,10]]),
+
+    // ── Search Terms ──
+    searchTerms:    W([[/search.*term/i,10],[/customer.*quer/i,10],[/actual.*quer/i,10],[/search.*quer/i,9],[/what.*customer.*search/i,10],[/customer.*search/i,9],[/harvest.*list/i,11],[/harvest.*term/i,11],[/promote.*term/i,9],[/term.*to.*keyword/i,10]]),
+
+    // ── Placement / Visibility ──
+    placement:      W([[/placement/i,10],[/top.*of.*search/i,11],[/tos\b/i,10],[/rest.*of.*search/i,10],[/product.*page.*placement/i,10],[/where.*ad.*show/i,9],[/above.*fold/i,9]]),
+
+    // ── CTR ──
+    ctr:            W([[/\bctr\b/i,9],[/click.*through/i,9],[/click.*rate/i,8],[/not.*getting.*click/i,10],[/low.*click/i,8],[/click.*problem/i,9],[/impression.*no.*click/i,10]]),
+
+    // ── Impressions / Visibility ──
+    impressions:    W([[/impression/i,8],[/visibility/i,8],[/\breach\b/i,7],[/not.*showing/i,9],[/not.*seen/i,9],[/impression.*share/i,10],[/page.*view/i,7],[/not.*getting.*impression/i,10]]),
+
+    // ── Revenue / Spend ──
+    revenue:        W([[/\brevenue\b/i,8],[/total.*sales/i,7],[/ordered.*revenue/i,9],[/how.*much.*making/i,9],[/gross.*sales/i,8],[/earning/i,7],[/income/i,6]]),
+    spend:          W([[/total.*spend/i,8],[/ad.*budget/i,8],[/how.*much.*spending/i,9],[/\bcpc\b/i,9],[/cost.*per.*click/i,9],[/daily.*budget/i,8]]),
+
+    // ── TACOS ──
+    tacos:          W([[/\btacos\b/i,12],[/total.*acos/i,11],[/blended.*acos/i,11],[/organic.*ratio/i,10],[/ad.*vs.*organic/i,10],[/advertising.*cost.*total/i,10]]),
+
+    // ── Brand ──
+    brands:         W([[/by.*brand/i,9],[/brand.*breakdown/i,9],[/brand.*performance/i,9],[/per.*brand/i,9],[/brand.*revenue/i,8]]),
+    brandedKw:      W([[/branded.*keyword/i,11],[/brand.*defense/i,11],[/brand.*campaign/i,10],[/protect.*brand/i,10],[/competitor.*keyword/i,10],[/conquesting/i,11],[/branded.*vs.*non/i,11],[/non.*brand/i,9]]),
+
+    // ── ASIN-level ──
+    asinOverview:   W([[/\basin.*overview/i,9],[/\basin.*list/i,8],[/all.*asin/i,8],[/my.*product/i,6],[/product.*list/i,7]]),
+    newVsMature:    W([[/new.*asin/i,10],[/new.*product/i,9],[/launch/i,8],[/ramp.*up/i,9],[/mature.*asin/i,10],[/established.*product/i,9]]),
+
+    // ── Campaign-level ──
+    campaigns:      W([[/campaign/i,7],[/ad.*group/i,7]]),
+
+    // ── Opportunities ──
+    opportunities:  W([[/opportunit/i,8],[/\bgrow\b/i,7],[/\bscale\b/i,8],[/\bupside\b/i,9],[/potential/i,7],[/where.*win/i,9],[/room.*grow/i,9],[/increase.*sales/i,8],[/expand/i,6]]),
+
+    // ── Compare ──
+    compare:        W([[/compar/i,8],[/\bvs\b/i,8],[/versus/i,8],[/best.*vs.*worst/i,10],[/side.*by.*side/i,9],[/differ/i,7],[/best.*and.*worst/i,9]]),
+  };
+
+  // ── 5. ENTITY-FOCUS DETECTION ────────────────────────────────────────────────
+  const isSearchTermFocus = intents.searchTerms >= 9;
+  const isNegativeFocus   = intents.negatives   >= 9;
+  const isMatchTypeFocus  = intents.matchType   >= 9;
+  const isKeywordFocus    = !isSearchTermFocus && !isNegativeFocus && !isMatchTypeFocus &&
+                            (intents.keywords >= 6);
+  const isCampaignFocus   = !isSearchTermFocus && !isKeywordFocus &&
+                            (intents.campaigns >= 6 || (intents.asinOverview === 0 && (intents.highAcos >= 6 || intents.wasteOverall >= 6 || intents.ctr >= 6)));
+  const isAsinFocus       = !isKeywordFocus && !isSearchTermFocus &&
+                            (intents.asinOverview >= 6 || intents.highReturn >= 6 || (intents.revenue >= 6 && intents.campaigns < 6));
+
+  // ── 6. SORTED INTENTS ────────────────────────────────────────────────────────
+  const sorted = Object.entries(intents).sort((a, b) => b[1] - a[1]);
+  const top = sorted[0];
+  const second = sorted[1];
+
+  // ── 7. HIGH-SPECIFICITY ROUTES (always win) ──────────────────────────────────
+
+  if (intents.tacos >= 10) return computeTacos(audit);
+  if (intents.killList >= 10) return computeKillList(audit, limit);
+  if (isNegativeFocus) return computeNegativeGaps(audit, limit);
+  if (isMatchTypeFocus) return computeMatchTypeBreakdown(audit);
+  if (intents.brandedKw >= 9) return computeBrandedKeywords(audit, limit);
+  if (intents.placement >= 9) return computePlacement(audit);
+
+  if (isSearchTermFocus) return computeSearchTerms(audit, q, limit);
+
+  if (intents.zeroConversion >= 8) {
     if (isKeywordFocus) return computeZeroConversionKeywords(audit, q, limit);
     if (isCampaignFocus) return computeZeroConversionCampaigns(audit, limit);
     return computeZeroConversionAsins(audit, limit);
   }
 
-  // ── Keywords ──
-  if (isKeywordFocus) {
-    return computeKeywords(audit, q, limit);
-  }
+  if (isKeywordFocus) return computeKeywords(audit, q, limit);
 
-  // ── Priority / What should I do first ──
-  if (scores.priority > 1 || (scores.summary > 0 && scores.priority > 0)) {
-    return computePriority(audit);
-  }
+  // ── 8. PRIORITY / SUMMARY ────────────────────────────────────────────────────
+  if (intents.priority >= 8) return computePriority(audit);
+  if (intents.summary >= 7 && intents.priority < 5) return computeSummary(audit);
 
-  // ── Complex multi-filter ASIN queries ──
-  if (isComplexFilter && isAsinFocus) {
-    return computeComplexAsinQuery(audit, q, limit, scores);
-  }
+  // ── 9. COMPLEX MULTI-FILTER ──────────────────────────────────────────────────
+  const s = { // legacy format for complex query functions
+    highReturn: intents.highReturn, highCvr: intents.highCvr,
+    lowCvr: intents.lowCvr, highAcos: intents.highAcos,
+    waste: intents.wasteOverall, campaigns: intents.campaigns,
+    ctr: intents.ctr, asins: intents.asinOverview,
+  };
+  const isComplexFilter = (s.highReturn >= 6 && s.highCvr >= 6) ||
+                          (s.highAcos >= 6 && s.lowCvr >= 6) ||
+                          (s.lowCvr >= 6 && s.highReturn >= 6);
 
-  // ── Complex multi-filter Campaign queries ──
-  if (isComplexFilter && isCampaignFocus) {
-    return computeComplexCampaignQuery(audit, q, limit, scores);
-  }
+  if (isComplexFilter && isAsinFocus) return computeComplexAsinQuery(audit, q, limit, s);
+  if (isComplexFilter && isCampaignFocus) return computeComplexCampaignQuery(audit, q, limit, s);
 
-  // ── Single-topic routing ──
-  const topIntent = Object.entries(scores).sort((a, b) => b[1] - a[1])[0];
-
-  if (topIntent[1] === 0) return computeSummary(audit); // nothing matched → summary
+  // ── 10. SINGLE-TOPIC ROUTING ─────────────────────────────────────────────────
+  if (top[1] === 0) return computeSummary(audit);
 
   let result: ComputedAnswer;
-  switch (topIntent[0]) {
-    case "searchTerms":    result = computeSearchTerms(audit, q, limit); break;
+  switch (top[0]) {
+    case "killList":       result = computeKillList(audit, limit); break;
     case "zeroConversion": result = computeZeroConversionAsins(audit, limit); break;
-    case "waste":          result = isCampaignFocus ? computeWasteCampaigns(audit, limit) : computeWasteOverall(audit); break;
+    case "wasteOverall":   result = isCampaignFocus ? computeWasteCampaigns(audit, limit) : computeWasteOverall(audit); break;
     case "highAcos":       result = isCampaignFocus ? computeHighAcosCampaigns(audit, limit) : computeHighAcosAsins(audit, limit); break;
     case "lowCvr":         result = isCampaignFocus ? computeLowCvrCampaigns(audit, limit) : computeLowCvrAsins(audit, limit); break;
     case "highCvr":        result = isCampaignFocus ? computeHighCvrCampaigns(audit, limit) : computeHighCvrAsins(audit, limit); break;
     case "highReturn":     result = computeHighReturnAsins(audit, limit); break;
     case "campaigns":      result = computeCampaignOverview(audit, limit); break;
-    case "asins":          result = computeAsinOverview(audit, limit); break;
+    case "asinOverview":   result = computeAsinOverview(audit, limit); break;
     case "keywords":       result = computeKeywords(audit, q, limit); break;
-    case "score":          result = computeScoreAnalysis(audit); break;
+    case "negatives":      result = computeNegativeGaps(audit, limit); break;
+    case "matchType":      result = computeMatchTypeBreakdown(audit); break;
+    case "searchTerms":    result = computeSearchTerms(audit, q, limit); break;
+    case "tacos":          result = computeTacos(audit); break;
+    case "brandedKw":      result = computeBrandedKeywords(audit, limit); break;
+    case "placement":      result = computePlacement(audit); break;
+    case "scoreAnalysis":  result = computeScoreAnalysis(audit); break;
     case "opportunities":  result = computeOpportunities(audit, limit); break;
     case "revenue":        result = computeRevenue(audit); break;
     case "spend":          result = computeSpend(audit); break;
+    case "highReturn":     result = computeHighReturnAsins(audit, limit); break;
     case "returns":        result = computeReturns(audit, limit); break;
     case "ctr":            result = computeCtr(audit, limit); break;
-    case "cvr":            result = computeCvr(audit, limit); break;
     case "impressions":    result = computeImpressions(audit); break;
     case "brands":         result = computeBrands(audit); break;
+    case "brandedKw":      result = computeBrandedKeywords(audit, limit); break;
     case "compare":        result = computeCompare(audit); break;
     case "datainfo":       result = computeDataInfo(audit); break;
+    case "priority":       result = computePriority(audit); break;
     case "summary":
     default:               result = computeSummary(audit); break;
   }
 
-  // ── Secondary intent: if question ALSO mentions score/redesign score,
-  //    append the score facts so GPT addresses both halves of the question ──
-  if (topIntent[0] !== "score" && scores.score > 0) {
+  // ── 11. SECONDARY INTENT: if question also mentions score, merge context ──────
+  if (top[0] !== "scoreAnalysis" && intents.scoreAnalysis >= 6) {
     const scoreCtx = computeScoreAnalysis(audit);
     result = {
       ...result,
-      facts: [
-        ...result.facts,
-        `--- ALSO: score context ---`,
-        ...scoreCtx.facts,
-      ],
-      nextSteps: [
-        ...result.nextSteps,
-        ...scoreCtx.nextSteps,
-      ],
+      facts: [...result.facts, `--- Score context ---`, ...scoreCtx.facts],
+      nextSteps: [...result.nextSteps, ...scoreCtx.nextSteps],
     };
   }
 
@@ -975,6 +1032,233 @@ function computeSearchTerms(audit: AuditResult, q: string, limit: number): Compu
       `Set up a weekly search term harvest cadence`,
     ].filter(Boolean),
     hasData: tableRows.length > 0,
+  };
+}
+
+// ── Specific ASIN deep-dive ────────────────────────────────────────────────────
+function computeSpecificAsin(audit: AuditResult, asin: string, q: string): ComputedAnswer {
+  const row = audit.asinTable.find(a => a.asin.toUpperCase() === asin);
+  if (!row) {
+    return {
+      intent: "specific_asin",
+      headline: `${asin} not found in uploaded data`,
+      facts: [`ASIN ${asin} was not found in the Vendor Central sales or campaign data`, `Make sure the correct files are uploaded`],
+      data: null, nextSteps: [`Upload Vendor Central and bulk campaign files that include ${asin}`], hasData: false,
+    };
+  }
+  return {
+    intent: "specific_asin",
+    headline: `${asin} "${row.title.slice(0, 50)}" — ${f$(row.orderedRevenue)} revenue, ${fp(row.acos)} ACOS`,
+    facts: [
+      `ASIN: ${asin} | Brand: ${row.brand}`,
+      `Ordered revenue: ${f$(row.orderedRevenue)} | Units: ${fn(row.orderedUnits)} | Page views: ${fn(row.pageViews)}`,
+      `Return rate: ${fp(row.returnRate)} | Revenue per view: $${row.revenuePerView.toFixed(3)}`,
+      `Ad spend: ${f$(row.adSpend)} | Ad sales: ${f$(row.adSales)} | Ad orders: ${fn(row.adOrders)}`,
+      `ACOS: ${fp(row.acos)} | CVR: ${fp(row.cvr)} | CTR: ${fp(row.ctr)}`,
+      row.acos > 0.5 ? `⚠️ ACOS above 50% — reduce bids` : row.acos > 0 && row.acos < 0.25 ? `✅ ACOS healthy — consider scaling` : "",
+      row.returnRate > 0.15 ? `⚠️ High return rate (${fp(row.returnRate)}) — review listing` : "",
+      row.adOrders === 0 && row.adSpend > 5 ? `⚠️ ${f$(row.adSpend)} ad spend with ZERO orders — pause ads immediately` : "",
+    ].filter(Boolean),
+    data: null,
+    nextSteps: [
+      row.adOrders === 0 && row.adSpend > 0 ? `Pause all ads for ${asin} — ${f$(row.adSpend)} wasted` : "",
+      row.acos > 0.5 ? `Reduce bids by ${Math.round((1 - 0.35/row.acos)*100)}% to hit 35% ACOS target` : "",
+      row.returnRate > 0.15 ? `Urgent: fix listing for ${asin} — ${fp(row.returnRate)} return rate` : "",
+      row.adSpend > 0 && row.acos < 0.25 && row.adOrders > 0 ? `Scale: increase daily budget on campaigns featuring ${asin}` : "",
+    ].filter(Boolean),
+    hasData: true,
+  };
+}
+
+// ── Kill list — exactly what to pause today ──────────────────────────────────
+function computeKillList(audit: AuditResult, limit: number): ComputedAnswer {
+  const zeroCamps = audit.campaignTable.filter(c => c.spend > 10 && c.orders === 0).sort((a,b) => b.spend - a.spend);
+  const highAcos  = audit.campaignTable.filter(c => c.acos > 0.8 && c.sales > 0).sort((a,b) => b.spend - a.spend);
+  const zeroKw    = (audit.keywordTable ?? []).filter(k => k.spend >= 20 && k.sales === 0 && k.state === "enabled").sort((a,b) => b.spend - a.spend).slice(0, 10);
+  const killCamps = [...zeroCamps, ...highAcos.filter(c => !zeroCamps.find(z => z.name === c.name))].slice(0, limit);
+  const totalRecover = killCamps.reduce((s,c) => s + c.spend, 0) + zeroKw.reduce((s,k) => s + k.spend, 0);
+
+  return {
+    intent: "kill_list",
+    headline: `Pause ${killCamps.length} campaigns + ${zeroKw.length} keywords — recover ${f$(totalRecover)} today`,
+    facts: [
+      `Zero-order campaigns: ${zeroCamps.length} — ${f$(zeroCamps.reduce((s,c)=>s+c.spend,0))} to recover`,
+      `High-ACOS campaigns (>80%): ${highAcos.length} — reduce bids or pause`,
+      `Enabled keywords with $0 sales (≥$20 spend): ${zeroKw.length} — ${f$(zeroKw.reduce((s,k)=>s+k.spend,0))}`,
+      zeroCamps[0] ? `Top campaign to kill: "${zeroCamps[0].name}" — ${f$(zeroCamps[0].spend)} spend, 0 orders` : "",
+      zeroKw[0]   ? `Top keyword to pause: "${zeroKw[0].keyword}" [${zeroKw[0].matchType}] — ${f$(zeroKw[0].spend)}` : "",
+    ].filter(Boolean),
+    data: killCamps.length > 0 ? {
+      columns: ["#", "Campaign", "Spend", "Sales", "ACOS", "Orders", "Action"],
+      rows: killCamps.map((c,i) => [i+1, c.name.slice(0,40), f$(c.spend), f$(c.sales), fp(c.acos), fn(c.orders), c.orders===0 ? "PAUSE NOW" : "CUT BIDS 50%"]),
+      csvReady: true,
+    } : null,
+    nextSteps: [
+      killCamps.length > 0 ? `Pause ${killCamps.length} campaigns — ${f$(killCamps.reduce((s,c)=>s+c.spend,0))} recoverable` : "",
+      zeroKw.length > 0   ? `Pause ${zeroKw.length} zero-sales keywords — ${f$(zeroKw.reduce((s,k)=>s+k.spend,0))} recoverable` : "",
+      `Reallocate recovered budget to campaigns with ACOS below 30%`,
+    ].filter(Boolean),
+    hasData: killCamps.length > 0 || zeroKw.length > 0,
+  };
+}
+
+// ── TACOS ────────────────────────────────────────────────────────────────────
+function computeTacos(audit: AuditResult): ComputedAnswer {
+  const { summary } = audit;
+  const tacos = safeDiv(summary.totalSpend, summary.totalOrderedRevenue);
+  const adSalesRatio = safeDiv(summary.totalSales, summary.totalOrderedRevenue);
+  const tacosLabel = tacos < 0.08 ? "Excellent" : tacos < 0.15 ? "Good" : tacos < 0.25 ? "Elevated" : "High";
+  return {
+    intent: "tacos",
+    headline: `TACOS: ${fp(tacos)} (${tacosLabel}) — ACOS: ${fp(summary.avgAcos)} | Ad-driven: ${fp(adSalesRatio)} of revenue`,
+    facts: [
+      `TACOS (ad spend ÷ total ordered revenue): ${fp(tacos)} — ${tacosLabel}`,
+      `ACOS (ad spend ÷ ad-attributed sales): ${fp(summary.avgAcos)}`,
+      `Total ad spend: ${f$(summary.totalSpend)}`,
+      `Total ordered revenue: ${f$(summary.totalOrderedRevenue)}`,
+      `Ad-attributed sales: ${f$(summary.totalSales)} (${fp(adSalesRatio)} of total revenue)`,
+      `Organic/other: ~${fp(1 - adSalesRatio)} of revenue`,
+      tacos > 0.20 ? `TACOS above 20% — ads are expensive relative to total business` : "",
+      tacos < 0.08 ? `TACOS below 8% — efficient, healthy organic contribution` : "",
+    ].filter(Boolean),
+    data: null,
+    nextSteps: [
+      tacos > 0.20 ? `Reduce TACOS by cutting ${f$(audit.totalWaste)} in wasted spend` : "",
+      tacos > 0.15 ? `Improve organic rank to reduce reliance on paid traffic` : "",
+      `Target TACOS of 8-15% for a healthy ad-to-organic balance`,
+    ].filter(Boolean),
+    hasData: true,
+  };
+}
+
+// ── Negative keyword gaps ────────────────────────────────────────────────────
+function computeNegativeGaps(audit: AuditResult, limit: number): ComputedAnswer {
+  const stTable = audit.searchTermTable ?? [];
+  const candidates = stTable.filter(s => s.spend >= 5 && s.sales === 0).sort((a,b) => b.spend - a.spend).slice(0, limit);
+  const totalWasted = candidates.reduce((s,r) => s + r.spend, 0);
+  const kwTable = audit.keywordTable ?? [];
+  const broadCount  = kwTable.filter(k => k.matchType.toLowerCase().includes("broad")).length;
+  const phraseCount = kwTable.filter(k => k.matchType.toLowerCase().includes("phrase")).length;
+
+  return {
+    intent: "negative_gaps",
+    headline: candidates.length > 0
+      ? `${candidates.length} search terms to add as negatives — ${f$(totalWasted)} currently wasted`
+      : "No obvious negative keyword gaps found — upload Search Term report for full analysis",
+    facts: [
+      stTable.length > 0 ? `${candidates.length} zero-sales search terms (≥$5 spend) are candidates for negatives` : "No Search Term report uploaded",
+      stTable.length > 0 ? `Total wasted on these terms: ${f$(totalWasted)}` : "Upload bulk file with SP Search Term Report sheet",
+      `Broad match keywords: ${broadCount} — highest risk for irrelevant traffic`,
+      `Phrase match keywords: ${phraseCount}`,
+      candidates[0] ? `Top negative candidate: "${candidates[0].searchTerm}" — ${f$(candidates[0].spend)} wasted` : "",
+    ].filter(Boolean),
+    data: candidates.length > 0 ? {
+      columns: ["#", "Add as Negative", "Campaign", "Wasted Spend", "Clicks"],
+      rows: candidates.map((s,i) => [i+1, s.searchTerm.slice(0,38), s.campaignName.slice(0,28), f$(s.spend), fn(s.clicks)]),
+      csvReady: true,
+    } : null,
+    nextSteps: [
+      candidates.length > 0 ? `Add top ${Math.min(20, candidates.length)} terms as negative exact in their campaigns` : "",
+      broadCount > 0 ? `Add campaign-level negatives to ${broadCount} broad match campaigns` : "",
+      `Set a weekly negative review cadence — 30 min/week protects significant budget`,
+    ].filter(Boolean),
+    hasData: candidates.length > 0,
+  };
+}
+
+// ── Match type breakdown ─────────────────────────────────────────────────────
+function computeMatchTypeBreakdown(audit: AuditResult): ComputedAnswer {
+  const kwTable = audit.keywordTable ?? [];
+  const byType: Record<string, { count: number; spend: number; sales: number; clicks: number; orders: number }> = {};
+  for (const k of kwTable) {
+    const mt = (k.matchType || "Unknown").toLowerCase();
+    if (!byType[mt]) byType[mt] = { count: 0, spend: 0, sales: 0, clicks: 0, orders: 0 };
+    byType[mt].count++;
+    byType[mt].spend  += k.spend;
+    byType[mt].sales  += k.sales;
+    byType[mt].clicks += k.clicks;
+    byType[mt].orders += k.orders;
+  }
+  const rows = Object.entries(byType).sort((a,b) => b[1].spend - a[1].spend)
+    .map(([mt, d], i) => [i+1, mt, d.count, f$(d.spend), f$(d.sales), fp(safeDiv(d.spend, d.sales)), fp(safeDiv(d.orders, d.clicks))]);
+  const broadData = byType["broad"] ?? byType["broad match"] ?? { spend:0, sales:0, orders:0, clicks:0, count:0 };
+  const exactData = byType["exact"] ?? byType["exact match"] ?? { spend:0, sales:0, orders:0, clicks:0, count:0 };
+
+  return {
+    intent: "match_type_breakdown",
+    headline: `Match type breakdown — ${Object.keys(byType).length} types across ${fn(kwTable.length)} keywords`,
+    facts: [
+      ...Object.entries(byType).map(([mt, d]) => `${mt}: ${d.count} keywords, ${f$(d.spend)} spend, ACOS ${fp(safeDiv(d.spend, d.sales))}`),
+      broadData.spend > exactData.spend ? `Broad match dominates spend — higher risk of irrelevant traffic` : `Exact match dominates — good control`,
+    ].filter(Boolean),
+    data: rows.length > 0 ? {
+      columns: ["#", "Match Type", "Keywords", "Spend", "Sales", "ACOS", "CVR"],
+      rows,
+      csvReady: true,
+    } : null,
+    nextSteps: [
+      broadData.spend > 0 ? `Review search terms for ${f$(broadData.spend)} in broad match — likely negative gaps` : "",
+      `Migrate converting broad/phrase search terms to exact match`,
+      exactData.count === 0 ? `No exact match keywords — add exact match for your proven terms` : "",
+    ].filter(Boolean),
+    hasData: rows.length > 0,
+  };
+}
+
+// ── Branded vs non-branded keywords ─────────────────────────────────────────
+function computeBrandedKeywords(audit: AuditResult, limit: number): ComputedAnswer {
+  const kwTable  = audit.keywordTable ?? [];
+  const topBrand = (audit.summary.topBrand || "").toLowerCase();
+  const brandedKw    = topBrand ? kwTable.filter(k => k.keyword.toLowerCase().includes(topBrand)) : [];
+  const nonBrandedKw = topBrand ? kwTable.filter(k => !k.keyword.toLowerCase().includes(topBrand)) : kwTable;
+  const brandedSpend  = brandedKw.reduce((s,k)=>s+k.spend,0);
+  const nonBrandSpend = nonBrandedKw.reduce((s,k)=>s+k.spend,0);
+  const brandedAcos   = safeDiv(brandedKw.reduce((s,k)=>s+k.spend,0), brandedKw.reduce((s,k)=>s+k.sales,0));
+  const nonBrandAcos  = safeDiv(nonBrandedKw.reduce((s,k)=>s+k.spend,0), nonBrandedKw.reduce((s,k)=>s+k.sales,0));
+
+  return {
+    intent: "branded_vs_nonbranded",
+    headline: `Branded: ${f$(brandedSpend)} (ACOS ${fp(brandedAcos)}) | Non-branded: ${f$(nonBrandSpend)} (ACOS ${fp(nonBrandAcos)})`,
+    facts: [
+      `Top brand detected: ${audit.summary.topBrand || "Not detected"}`,
+      `Branded keywords: ${brandedKw.length} — ${f$(brandedSpend)} spend, ${fp(brandedAcos)} ACOS`,
+      `Non-branded keywords: ${nonBrandedKw.length} — ${f$(nonBrandSpend)} spend, ${fp(nonBrandAcos)} ACOS`,
+      brandedAcos < nonBrandAcos ? `Branded terms have lower ACOS — brand defense is working` : `Non-branded ACOS is lower — strong generic keyword performance`,
+      brandedKw.length === 0 ? `No branded keywords detected — brand defense may be missing` : "",
+    ].filter(Boolean),
+    data: nonBrandedKw.slice(0, limit).length > 0 ? {
+      columns: ["#", "Keyword", "Match", "Spend", "Sales", "ACOS", "Orders"],
+      rows: nonBrandedKw.slice(0, limit).map((k,i) => [i+1, k.keyword.slice(0,35), k.matchType, f$(k.spend), f$(k.sales), fp(k.acos), fn(k.orders)]),
+      csvReady: true,
+    } : null,
+    nextSteps: [
+      brandedKw.length === 0 ? `Create brand defense campaign targeting "${audit.summary.topBrand}"` : "",
+      nonBrandAcos > 0.5 ? `Non-branded ACOS at ${fp(nonBrandAcos)} — add negatives and tighten match types` : "",
+      `Isolate competitor conquesting keywords in separate campaigns for better control`,
+    ].filter(Boolean),
+    hasData: kwTable.length > 0,
+  };
+}
+
+// ── Placement ────────────────────────────────────────────────────────────────
+function computePlacement(audit: AuditResult): ComputedAnswer {
+  return {
+    intent: "placement",
+    headline: `Placement data not in current upload — here's what to check`,
+    facts: [
+      `Top of Search (TOS) typically has 2-3x higher CVR than product page placements`,
+      `Account avg CVR: ${fp(audit.summary.avgCvr)} | Avg ACOS: ${fp(audit.summary.avgAcos)}`,
+      `If ACOS is high, TOS bid multipliers may be set too aggressively`,
+      `Product page placements can be cost-effective for lower-funnel shoppers`,
+      `Upload the Placement Report from Amazon Ads Console → Reports → Placements`,
+    ],
+    data: null,
+    nextSteps: [
+      `Download Placement Report from Amazon Ads Console`,
+      `If overall ACOS above 40%, reduce TOS bid multiplier by 20-30%`,
+      `Test 0% product page modifier for campaigns with low CVR`,
+    ],
+    hasData: false,
   };
 }
 
