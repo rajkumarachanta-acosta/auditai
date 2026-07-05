@@ -95,6 +95,25 @@
   .cal-field input { width: 120px; padding: 5px 8px; border: 1px solid var(--border); border-radius: 4px; font-size: 13px; background: var(--bg); color: var(--text); }
   .cal-field small { display: block; font-size: 11px; color: var(--muted); margin-top: 2px; }
 
+  /* Bulk upload section */
+  .bulk-info { background: var(--surface); border: 1px solid var(--border); border-radius: 6px; padding: 10px 14px; margin-bottom: 16px; font-size: 13px; display: none; }
+  .bulk-info .bulk-name { font-weight: 600; }
+  .bulk-info .bulk-meta { color: var(--muted); font-size: 12px; }
+  .bulk-info .bulk-summary { margin-top: 6px; color: var(--text); }
+
+  /* Status badges */
+  .status-badge { display: inline-block; padding: 1px 8px; border-radius: 99px; font-size: 11px; font-weight: 600; border: 1px solid; }
+  .status-new  { background: #f0fdf4; border-color: #86efac; color: #16a34a; }
+  .status-dupe { background: var(--surface); border-color: var(--border); color: var(--muted); }
+
+  /* Filter toggle pills */
+  .filter-toggle { display: flex; gap: 4px; }
+  .filter-toggle button {
+    padding: 5px 12px; border: 1px solid var(--border); border-radius: 99px;
+    font-size: 12px; cursor: pointer; background: var(--bg); color: var(--muted);
+  }
+  .filter-toggle button.active { background: var(--accent); border-color: var(--accent); color: #fff; }
+
   /* Run button */
   #run-btn {
     display: block; width: 100%; padding: 11px; border: none;
@@ -104,6 +123,15 @@
   }
   #run-btn:disabled { opacity: 0.45; cursor: not-allowed; }
   #run-btn:not(:disabled):hover { opacity: 0.88; }
+
+  /* Bulk download button */
+  #bulk-download-btn {
+    padding: 7px 16px; background: #16a34a; border: none;
+    border-radius: 5px; font-size: 13px; font-weight: 600;
+    cursor: pointer; color: #fff; white-space: nowrap;
+  }
+  #bulk-download-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+  #bulk-download-btn:not(:disabled):hover { opacity: 0.88; }
 
   /* Error banner */
   .error-banner { background: #fef2f2; border: 1px solid #fca5a5; color: var(--red); border-radius: 6px; padding: 10px 14px; font-size: 13px; margin-bottom: 16px; display: none; }
@@ -120,6 +148,7 @@
   .summary-stat strong { font-size: 15px; display: block; }
   .summary-stat small { color: var(--muted); font-size: 11px; }
   .opp-badge { color: #16a34a; }
+  .new-badge  { color: #3b82d4; }
 
   /* Filter + export row */
   .table-toolbar { display: flex; gap: 10px; align-items: center; margin-bottom: 10px; flex-wrap: wrap; }
@@ -210,9 +239,24 @@
     <div class="parse-summary" id="parse-summary" style="display:none"></div>
   </div>
 
+  <!-- BULK SHEET UPLOAD -->
+  <span class="section-label">2. Upload Bulk Campaign Report <span style="font-weight:400;color:var(--muted)">(optional — enables "Already added" status + bulk download)</span></span>
+  <div class="drop-zone" id="bulk-drop-zone">
+    <input type="file" id="bulk-file-input" accept=".xlsx,.csv">
+    <div class="drop-zone-icon">📊</div>
+    <div class="drop-zone-text">
+      Drag &amp; drop your Sponsored Products bulk sheet (.xlsx) here, or <strong id="bulk-browse-link">browse</strong>
+    </div>
+  </div>
+  <div class="bulk-info" id="bulk-info">
+    <div class="bulk-name" id="bulk-name-display"></div>
+    <div class="bulk-meta" id="bulk-meta-display"></div>
+    <div class="bulk-summary" id="bulk-summary-display"></div>
+  </div>
+
   <!-- ASIN INPUT -->
   <div class="asin-section">
-    <span class="section-label">2. Enter target ASINs</span>
+    <span class="section-label">3. Enter target ASINs</span>
     <textarea id="asin-input" placeholder="B01234ABCD, B09876ZYXW&#10;One per line or comma-separated"></textarea>
     <div class="asin-tags" id="asin-tags"></div>
   </div>
@@ -245,7 +289,13 @@
     <div class="summary-strip" id="summary-strip"></div>
     <div class="table-toolbar">
       <input type="text" id="filter-input" placeholder="Filter keywords…">
+      <div class="filter-toggle" id="status-toggle">
+        <button class="active" data-val="all">All</button>
+        <button data-val="new">New only</button>
+        <button data-val="added">Already added</button>
+      </div>
       <button id="export-btn">⬇ Export CSV</button>
+      <button id="bulk-download-btn" disabled>⬇ Download bulk upload sheet</button>
     </div>
     <div class="table-wrap">
       <table id="results-table">
@@ -571,46 +621,416 @@ function parsePercent(val) {
 // =============================================================================
 // MAIN THREAD GLOBALS
 // =============================================================================
-let parsedResults   = [];    // all result records from worker
-let filteredResults = [];    // after filter/sort
+let parsedResults   = [];
+let filteredResults = [];
 let currentPage     = 0;
 let sortCol         = 'sfr';
 let sortDir         = 'asc';
 let multipleAsins   = false;
 let workerBlobUrl   = null;
+let statusFilter    = 'all';  // 'all' | 'new' | 'added'
 
 // =============================================================================
 // DOM REFS
 // =============================================================================
-const dropZone      = document.getElementById('drop-zone');
-const fileInput     = document.getElementById('file-input');
-const browseLink    = document.getElementById('browse-link');
-const fileInfoEl    = document.getElementById('file-info');
-const fileNameEl    = document.getElementById('file-name-display');
-const fileMetaEl    = document.getElementById('file-meta-display');
-const progressWrap  = document.getElementById('progress-wrap');
-const progressFill  = document.getElementById('progress-fill');
-const progressText  = document.getElementById('progress-text');
-const parseSummary  = document.getElementById('parse-summary');
-const asinInput     = document.getElementById('asin-input');
-const asinTagsEl    = document.getElementById('asin-tags');
-const runBtn        = document.getElementById('run-btn');
-const errorBanner   = document.getElementById('error-banner');
-const resultsSection= document.getElementById('results-section');
-const summaryStrip  = document.getElementById('summary-strip');
-const filterInput   = document.getElementById('filter-input');
-const exportBtn     = document.getElementById('export-btn');
-const resultsTbody  = document.getElementById('results-tbody');
-const resultsThead  = document.getElementById('results-thead');
-const showMoreBtn   = document.getElementById('show-more-btn');
+const dropZone         = document.getElementById('drop-zone');
+const fileInput        = document.getElementById('file-input');
+const browseLink       = document.getElementById('browse-link');
+const fileInfoEl       = document.getElementById('file-info');
+const fileNameEl       = document.getElementById('file-name-display');
+const fileMetaEl       = document.getElementById('file-meta-display');
+const progressWrap     = document.getElementById('progress-wrap');
+const progressFill     = document.getElementById('progress-fill');
+const progressText     = document.getElementById('progress-text');
+const parseSummary     = document.getElementById('parse-summary');
+const bulkDropZone     = document.getElementById('bulk-drop-zone');
+const bulkFileInput    = document.getElementById('bulk-file-input');
+const bulkBrowseLink   = document.getElementById('bulk-browse-link');
+const bulkInfoEl       = document.getElementById('bulk-info');
+const bulkNameEl       = document.getElementById('bulk-name-display');
+const bulkMetaEl       = document.getElementById('bulk-meta-display');
+const bulkSummaryEl    = document.getElementById('bulk-summary-display');
+const asinInput        = document.getElementById('asin-input');
+const asinTagsEl       = document.getElementById('asin-tags');
+const runBtn           = document.getElementById('run-btn');
+const errorBanner      = document.getElementById('error-banner');
+const resultsSection   = document.getElementById('results-section');
+const summaryStrip     = document.getElementById('summary-strip');
+const filterInput      = document.getElementById('filter-input');
+const statusToggle     = document.getElementById('status-toggle');
+const exportBtn        = document.getElementById('export-btn');
+const bulkDownloadBtn  = document.getElementById('bulk-download-btn');
+const resultsTbody     = document.getElementById('results-tbody');
+const resultsThead     = document.getElementById('results-thead');
+const showMoreBtn      = document.getElementById('show-more-btn');
 
 // =============================================================================
 // STATE
 // =============================================================================
-let fileReady    = false;
-let loadedFile   = null;
-let totalRowsInFile = 0;
-let detectedRange = null;
+let fileReady       = false;
+let loadedFile      = null;
+let detectedRange   = null;
+
+// Bulk sheet state — populated by parseBulkSheet()
+// bulkData.adGroups: Map<adGroupKey, { campaign, adGroup, defaultBid, matchTypes: Set }>
+// bulkData.existingKeys: Set<"ASIN|||keyword|||matchtype"> — for dupe detection
+// bulkData.asinToAdGroups: Map<ASIN, adGroupKey[]>
+let bulkData = null;  // null = no bulk sheet loaded
+
+// =============================================================================
+// =============================================================================
+// XLSX PARSER — pure JS, no dependencies
+// Reads just the two sheets we need from the ZIP structure.
+// Amazon bulk sheets are Office Open XML (.xlsx = ZIP of XML files).
+// =============================================================================
+// =============================================================================
+
+// ── Minimal ZIP reader ───────────────────────────────────────────────────────
+// Locates files inside a ZIP by scanning the Central Directory at the end.
+function readZipEntries(buf) {
+  const u8    = new Uint8Array(buf);
+  const view  = new DataView(buf);
+  const len   = u8.length;
+
+  // Find End of Central Directory record (signature 0x06054b50) scanning from end
+  let eocdOff = -1;
+  for (let i = len - 22; i >= 0; i--) {
+    if (view.getUint32(i, true) === 0x06054b50) { eocdOff = i; break; }
+  }
+  if (eocdOff === -1) throw new Error('Not a valid ZIP file.');
+
+  const cdOffset = view.getUint32(eocdOff + 16, true);
+  const cdCount  = view.getUint16(eocdOff + 8,  true);
+
+  const entries = new Map(); // filename → { offset, compSize, uncompSize, method }
+  let   pos     = cdOffset;
+  for (let i = 0; i < cdCount; i++) {
+    if (view.getUint32(pos, true) !== 0x02014b50) break;
+    const method    = view.getUint16(pos + 10, true);
+    const compSize  = view.getUint32(pos + 20, true);
+    const uncompSize= view.getUint32(pos + 24, true);
+    const fnLen     = view.getUint16(pos + 28, true);
+    const extraLen  = view.getUint16(pos + 30, true);
+    const commentLen= view.getUint16(pos + 32, true);
+    const localOff  = view.getUint32(pos + 42, true);
+    const filename  = new TextDecoder().decode(u8.slice(pos + 46, pos + 46 + fnLen));
+    entries.set(filename, { localOff, compSize, uncompSize, method });
+    pos += 46 + fnLen + extraLen + commentLen;
+  }
+  return entries;
+}
+
+// ── Inflate (decompress) a DEFLATE-compressed ZIP entry ─────────────────────
+// Uses DecompressionStream which is available in all modern browsers.
+async function inflateEntry(buf, entry) {
+  const view     = new DataView(buf);
+  const localOff = entry.localOff;
+  // Skip local file header to get to the compressed data
+  const fnLen    = view.getUint16(localOff + 26, true);
+  const exLen    = view.getUint16(localOff + 28, true);
+  const dataOff  = localOff + 30 + fnLen + exLen;
+  const compressed = buf.slice(dataOff, dataOff + entry.compSize);
+
+  if (entry.method === 0) {
+    // Stored (no compression)
+    return compressed;
+  }
+  // DEFLATE (method 8) — wrap in raw deflate stream
+  const ds = new DecompressionStream('deflate-raw');
+  const writer = ds.writable.getWriter();
+  writer.write(new Uint8Array(compressed));
+  writer.close();
+  const chunks = [];
+  const reader = ds.readable.getReader();
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    chunks.push(value);
+  }
+  const total = chunks.reduce((s, c) => s + c.length, 0);
+  const out   = new Uint8Array(total);
+  let off2 = 0;
+  for (const c of chunks) { out.set(c, off2); off2 += c.length; }
+  return out.buffer;
+}
+
+// ── Extract a named ZIP entry as a UTF-8 string ─────────────────────────────
+async function extractZipEntry(buf, entries, name) {
+  const entry = entries.get(name);
+  if (!entry) return null;
+  const inflated = await inflateEntry(buf, entry);
+  return new TextDecoder('utf-8').decode(inflated);
+}
+
+// ── Parse an XLSX sheet XML into a 2D array of string values ────────────────
+// Handles shared strings table (sst) and inline strings.
+function parseSheetXml(xml, sstStrings) {
+  const rows = [];
+  // Iterate <row> elements
+  const rowRe  = /<row\b[^>]*>([\s\S]*?)<\/row>/g;
+  const cellRe = /<c\b([^>]*)>([\s\S]*?)<\/c>/g;
+  const vRe    = /<v>([\s\S]*?)<\/v>/;
+  const isRe   = /<is>[\s\S]*?<t>([\s\S]*?)<\/t>[\s\S]*?<\/is>/;
+  const rAttr  = /\br="([A-Z]+)(\d+)"/;
+  const tAttr  = /\bt="([^"]+)"/;
+
+  let rowMatch;
+  while ((rowMatch = rowRe.exec(xml)) !== null) {
+    const rowXml  = rowMatch[1];
+    const rowArr  = [];
+    let   cellMatch;
+    cellRe.lastIndex = 0;
+    while ((cellMatch = cellRe.exec(rowXml)) !== null) {
+      const attrs    = cellMatch[1];
+      const inner    = cellMatch[2];
+      const rM       = rAttr.exec(attrs);
+      const colLetter= rM ? rM[1] : null;
+      const colIdx   = colLetter ? colLetterToIndex(colLetter) : rowArr.length;
+      const tM       = tAttr.exec(attrs);
+      const cellType = tM ? tM[1] : 'n';
+      let   val      = '';
+      if (cellType === 's') {
+        // shared string index
+        const vM = vRe.exec(inner);
+        if (vM) val = sstStrings[parseInt(vM[1])] || '';
+      } else if (cellType === 'inlineStr') {
+        const isM = isRe.exec(inner);
+        if (isM) val = isM[1];
+      } else {
+        const vM = vRe.exec(inner);
+        if (vM) val = vM[1];
+      }
+      // Ensure rowArr is long enough
+      while (rowArr.length <= colIdx) rowArr.push('');
+      rowArr[colIdx] = xmlDecode(val);
+    }
+    if (rowArr.some(c => c !== '')) rows.push(rowArr);
+  }
+  return rows;
+}
+
+function colLetterToIndex(letters) {
+  let idx = 0;
+  for (let i = 0; i < letters.length; i++) {
+    idx = idx * 26 + (letters.charCodeAt(i) - 64);
+  }
+  return idx - 1;
+}
+
+function xmlDecode(s) {
+  return s.replace(/&amp;/g,'&').replace(/&lt;/g,'<').replace(/&gt;/g,'>').replace(/&quot;/g,'"').replace(/&#(\d+);/g,(_,n)=>String.fromCharCode(+n));
+}
+
+// ── Parse shared strings table ───────────────────────────────────────────────
+function parseSst(xml) {
+  const strings = [];
+  const siRe = /<si>([\s\S]*?)<\/si>/g;
+  const tRe  = /<t[^>]*>([\s\S]*?)<\/t>/g;
+  let m;
+  while ((m = siRe.exec(xml)) !== null) {
+    const parts = [];
+    let t;
+    tRe.lastIndex = 0;
+    while ((t = tRe.exec(m[1])) !== null) parts.push(xmlDecode(t[1]));
+    strings.push(parts.join(''));
+  }
+  return strings;
+}
+
+// ── Get workbook sheet names → rId → sheet filename mapping ─────────────────
+function parseWorkbookXml(xml) {
+  const sheets = [];
+  const re = /<sheet\b[^>]*name="([^"]*)"[^>]*r:id="([^"]*)"[^>]*/g;
+  let m;
+  while ((m = re.exec(xml)) !== null) sheets.push({ name: m[1], rId: m[2] });
+  return sheets;
+}
+
+function parseRelsXml(xml) {
+  const map = new Map(); // rId → target
+  const re  = /<Relationship\b[^>]*Id="([^"]*)"[^>]*Target="([^"]*)"[^>]*/g;
+  let m;
+  while ((m = re.exec(xml)) !== null) map.set(m[1], m[2]);
+  return map;
+}
+
+// ── Main XLSX parser — returns Map<sheetName (lower), rows[][]> ──────────────
+async function parseXlsx(arrayBuffer) {
+  let entries;
+  try { entries = readZipEntries(arrayBuffer); }
+  catch(e) { throw new Error('Could not read file as XLSX. Is it a valid .xlsx bulk sheet? (' + e.message + ')'); }
+
+  // Shared strings (may not exist if no shared strings)
+  let sstStrings = [];
+  const sstXml = await extractZipEntry(arrayBuffer, entries, 'xl/sharedStrings.xml');
+  if (sstXml) sstStrings = parseSst(sstXml);
+
+  // Workbook + rels
+  const wbXml   = await extractZipEntry(arrayBuffer, entries, 'xl/workbook.xml');
+  const relsXml = await extractZipEntry(arrayBuffer, entries, 'xl/_rels/workbook.xml.rels');
+  if (!wbXml || !relsXml) throw new Error('Missing xl/workbook.xml or its .rels file. Not a standard XLSX.');
+
+  const sheetDefs = parseWorkbookXml(wbXml);
+  const relsMap   = parseRelsXml(relsXml);
+
+  const result = new Map(); // sheetName.toLowerCase() → rows[][]
+  for (const sd of sheetDefs) {
+    const target = relsMap.get(sd.rId);
+    if (!target) continue;
+    // Target is relative to xl/, may start with "worksheets/" or "/xl/worksheets/"
+    const path = target.startsWith('/') ? target.slice(1) : 'xl/' + target;
+    const shXml = await extractZipEntry(arrayBuffer, entries, path);
+    if (!shXml) continue;
+    const rows = parseSheetXml(shXml, sstStrings);
+    result.set(sd.name.toLowerCase(), rows);
+  }
+  return result;
+}
+
+// =============================================================================
+// BULK SHEET PARSER
+// Extracts from the Amazon Ads Sponsored Products bulk sheet:
+//   1. ASIN → [{ campaign, adGroup, defaultBid }] from "Sponsored Products Product Ads"
+//   2. Existing keyword set from "Sponsored Products Keywords"
+// =============================================================================
+async function parseBulkSheet(file) {
+  const buf = await file.arrayBuffer();
+
+  let sheetMap;
+  if (file.name.toLowerCase().endsWith('.csv')) {
+    // Treat as single-sheet CSV named "bulk"
+    const text = new TextDecoder('utf-8').decode(buf);
+    sheetMap   = new Map([['bulk', csvToRows(text)]]);
+  } else {
+    sheetMap = await parseXlsx(buf);
+  }
+
+  // Find the sheets we need — match by name fragment
+  const findSheet = (fragment) => {
+    for (const [name, rows] of sheetMap) {
+      if (name.includes(fragment)) return rows;
+    }
+    return null;
+  };
+
+  const kwSheet  = findSheet('keyword');
+  const adSheet  = findSheet('product ad');
+
+  const warnings = [];
+  if (!kwSheet)  warnings.push('Could not find a "Sponsored Products Keywords" sheet — status column will be blank.');
+  if (!adSheet)  warnings.push('Could not find a "Sponsored Products Product Ads" sheet — campaign mapping unavailable.');
+
+  // ── Parse keywords sheet ─────────────────────────────────────────────────
+  // Columns we need: Entity, Campaign Name, Ad Group Name, Keyword, Match Type, Status
+  // Key index by header row (first row)
+  const existingKeys  = new Set();   // "keyword|||matchtype" for fast lookup
+  const adGroupBids   = new Map();   // adGroupKey → defaultBid
+  const adGroupMeta   = new Map();   // adGroupKey → { campaign, adGroup }
+
+  if (kwSheet && kwSheet.length > 1) {
+    const hdr  = kwSheet[0].map(h => (h || '').toLowerCase().trim());
+    const iEnt = hdr.findIndex(h => h === 'entity' || h.includes('entity'));
+    const iCam = hdr.findIndex(h => h.includes('campaign name') || h === 'campaign');
+    const iAG  = hdr.findIndex(h => h.includes('ad group name') || h === 'ad group');
+    const iKW  = hdr.findIndex(h => h === 'keyword' || h.includes('keyword text'));
+    const iMT  = hdr.findIndex(h => h.includes('match type'));
+    const iSt  = hdr.findIndex(h => h === 'state' || h === 'status');
+    const iBid = hdr.findIndex(h => h.includes('bid') && !h.includes('budget'));
+
+    for (let i = 1; i < kwSheet.length; i++) {
+      const row = kwSheet[i];
+      // Only process keyword rows (Entity column = "Keyword"), skip paused if desired
+      const ent = iEnt >= 0 ? (row[iEnt] || '').toLowerCase() : '';
+      if (iEnt >= 0 && ent && !ent.includes('keyword')) continue;
+      const state = iSt >= 0 ? (row[iSt] || '').toLowerCase() : '';
+      if (state === 'archived') continue;
+
+      const kw = (iKW >= 0 ? row[iKW] : '').trim().toLowerCase();
+      const mt = (iMT >= 0 ? row[iMT] : '').trim().toLowerCase() || 'broad';
+      if (!kw) continue;
+
+      existingKeys.add(kw + '|||' + mt);
+
+      // Also collect ad group bid
+      const cam = iCam >= 0 ? (row[iCam] || '').trim() : '';
+      const ag  = iAG  >= 0 ? (row[iAG]  || '').trim() : '';
+      if (cam && ag && iBid >= 0) {
+        const key = cam + '|||' + ag;
+        const bid = parseFloat(row[iBid]);
+        if (!isNaN(bid) && !adGroupBids.has(key)) {
+          adGroupBids.set(key, bid);
+          adGroupMeta.set(key, { campaign: cam, adGroup: ag });
+        }
+      }
+    }
+  }
+
+  // ── Parse product ads sheet ──────────────────────────────────────────────
+  // Columns: Entity, Campaign Name, Ad Group Name, ASIN / SKU, State
+  const asinToAdGroups = new Map();  // ASIN → Set<adGroupKey>
+
+  if (adSheet && adSheet.length > 1) {
+    const hdr  = adSheet[0].map(h => (h || '').toLowerCase().trim());
+    const iEnt = hdr.findIndex(h => h.includes('entity'));
+    const iCam = hdr.findIndex(h => h.includes('campaign name') || h === 'campaign');
+    const iAG  = hdr.findIndex(h => h.includes('ad group name') || h === 'ad group');
+    const iSKU = hdr.findIndex(h => h.includes('sku') || h.includes('asin'));
+    const iSt  = hdr.findIndex(h => h === 'state' || h === 'status');
+    const iBid = hdr.findIndex(h => h.includes('bid') && !h.includes('budget'));
+
+    for (let i = 1; i < adSheet.length; i++) {
+      const row  = adSheet[i];
+      const ent  = iEnt >= 0 ? (row[iEnt] || '').toLowerCase() : '';
+      if (iEnt >= 0 && ent && !ent.includes('product ad')) continue;
+      const state = iSt >= 0 ? (row[iSt] || '').toLowerCase() : '';
+      if (state === 'archived') continue;
+
+      const sku = (iSKU >= 0 ? row[iSKU] : '').trim().toUpperCase();
+      if (!sku) continue;
+      const cam = iCam >= 0 ? (row[iCam] || '').trim() : '';
+      const ag  = iAG  >= 0 ? (row[iAG]  || '').trim() : '';
+      if (!cam || !ag) continue;
+
+      const agKey = cam + '|||' + ag;
+      if (!asinToAdGroups.has(sku)) asinToAdGroups.set(sku, new Set());
+      asinToAdGroups.get(sku).add(agKey);
+
+      // If the product ads sheet has a bid column, use it as fallback ad group bid
+      if (iBid >= 0 && !adGroupBids.has(agKey)) {
+        const bid = parseFloat(row[iBid]);
+        if (!isNaN(bid)) adGroupBids.set(agKey, bid);
+      }
+      if (!adGroupMeta.has(agKey)) adGroupMeta.set(agKey, { campaign: cam, adGroup: ag });
+    }
+  }
+
+  const totalKw  = existingKeys.size;
+  const totalAGs = adGroupMeta.size;
+  const totalAsins = asinToAdGroups.size;
+
+  return {
+    existingKeys,
+    adGroupBids,
+    adGroupMeta,
+    asinToAdGroups,
+    stats: { totalKw, totalAGs, totalAsins },
+    warnings,
+  };
+}
+
+// Simple CSV to rows (for bulk CSV fallback)
+function csvToRows(text) {
+  return text.split('\n').map(line => {
+    const cols = []; let cur = ''; let inQ = false;
+    for (let i = 0; i < line.length; i++) {
+      const c = line[i];
+      if (c === '"') { if (inQ && line[i+1]==='"'){cur+='"';i++;}else inQ=!inQ; }
+      else if (c === ',' && !inQ) { cols.push(cur.trim()); cur=''; }
+      else cur += c;
+    }
+    cols.push(cur.trim()); return cols;
+  }).filter(r => r.some(c => c));
+}
 
 // =============================================================================
 // ASIN PARSING & VALIDATION
@@ -663,11 +1083,10 @@ function checkRunReady() {
 }
 
 // =============================================================================
-// FILE DROP / BROWSE
+// FILE DROP / BROWSE — Brand Analytics CSV
 // =============================================================================
 browseLink.addEventListener('click', () => fileInput.click());
 dropZone.addEventListener('click', () => fileInput.click());
-
 dropZone.addEventListener('dragover', e => { e.preventDefault(); dropZone.classList.add('drag-over'); });
 dropZone.addEventListener('dragleave', () => dropZone.classList.remove('drag-over'));
 dropZone.addEventListener('drop', e => {
@@ -677,6 +1096,78 @@ dropZone.addEventListener('drop', e => {
   if (f) handleFile(f);
 });
 fileInput.addEventListener('change', () => { if (fileInput.files[0]) handleFile(fileInput.files[0]); });
+
+// =============================================================================
+// BULK SHEET DROP / BROWSE
+// =============================================================================
+bulkBrowseLink.addEventListener('click', () => bulkFileInput.click());
+bulkDropZone.addEventListener('click', () => bulkFileInput.click());
+bulkDropZone.addEventListener('dragover', e => { e.preventDefault(); bulkDropZone.classList.add('drag-over'); });
+bulkDropZone.addEventListener('dragleave', () => bulkDropZone.classList.remove('drag-over'));
+bulkDropZone.addEventListener('drop', e => {
+  e.preventDefault();
+  bulkDropZone.classList.remove('drag-over');
+  const f = e.dataTransfer.files[0];
+  if (f) handleBulkFile(f);
+});
+bulkFileInput.addEventListener('change', () => { if (bulkFileInput.files[0]) handleBulkFile(bulkFileInput.files[0]); });
+
+async function handleBulkFile(file) {
+  bulkData = null;
+  bulkDownloadBtn.disabled = true;
+  bulkNameEl.textContent  = file.name;
+  bulkMetaEl.textContent  = formatBytes(file.size);
+  bulkSummaryEl.textContent = 'Parsing…';
+  bulkInfoEl.style.display = 'block';
+  hideError();
+
+  try {
+    bulkData = await parseBulkSheet(file);
+    const s = bulkData.stats;
+    bulkSummaryEl.textContent =
+      `Found ${fmtNum(s.totalKw)} existing keywords · ${fmtNum(s.totalAGs)} ad groups · ${fmtNum(s.totalAsins)} ASINs with product ads`;
+    if (bulkData.warnings.length) {
+      bulkSummaryEl.textContent += ' — ⚠ ' + bulkData.warnings.join('; ');
+    }
+    // Re-annotate results if a lookup was already run
+    if (parsedResults.length) {
+      annotateBulk();
+      applyFilterAndSort();
+    }
+  } catch (err) {
+    showError('Bulk sheet error: ' + err.message);
+    bulkInfoEl.style.display = 'none';
+    bulkData = null;
+  }
+}
+
+// ── Annotate parsedResults with bulk status ──────────────────────────────────
+// Adds .status ('new'|'added') and .adGroups array to every result record.
+function annotateBulk() {
+  if (!bulkData) {
+    for (const r of parsedResults) { r.status = null; r.adGroups = []; }
+    return;
+  }
+  for (const r of parsedResults) {
+    const kwKey = r.searchTerm.toLowerCase() + '|||';
+    // A term is "added" if it exists under ANY match type for this keyword
+    const isAdded = ['broad','phrase','exact'].some(mt =>
+      bulkData.existingKeys.has(kwKey + mt)
+    );
+    r.status = isAdded ? 'added' : 'new';
+
+    // Map ASIN → ad groups it's in
+    const agSet = bulkData.asinToAdGroups.get(r.asin) || new Set();
+    r.adGroups = [...agSet].map(key => {
+      const meta = bulkData.adGroupMeta.get(key) || { campaign: key, adGroup: '' };
+      const bid  = bulkData.adGroupBids.get(key) || 0.75;
+      return { ...meta, bid };
+    });
+  }
+  // Enable download button if there are any new keywords
+  const hasNew = parsedResults.some(r => r.status === 'new');
+  bulkDownloadBtn.disabled = !hasNew;
+}
 
 function handleFile(file) {
   fileReady = false;
@@ -776,6 +1267,8 @@ runBtn.addEventListener('click', () => {
       parseSummary.textContent = `Scanned ${fmtNum(msg.totalRows)} rows · found ${fmtNum(msg.results.length)} matches · ${elapsed}s`;
       parseSummary.style.display = 'block';
       parsedResults = msg.results;
+      // Annotate with bulk data if already loaded
+      annotateBulk();
       runBtn.disabled = false;
       runBtn.textContent = 'Run Reverse-ASIN Lookup';
       checkRunReady();
@@ -832,6 +1325,7 @@ function getColumns() {
     { key: 'conversionShare',  label: 'Conv. share %',          numeric: true  },
   ];
   if (multipleAsins) cols.push({ key: 'asin', label: 'Target ASIN', numeric: false });
+  if (bulkData)      cols.push({ key: 'status', label: 'Status', numeric: false });
   return cols;
 }
 
@@ -840,12 +1334,17 @@ function applyFilterAndSort() {
 
   let data = [...parsedResults];
 
-  // Filter
+  // Text filter
   if (query) {
     data = data.filter(r =>
       r.searchTerm.toLowerCase().includes(query) ||
       r.asin.toLowerCase().includes(query)
     );
+  }
+
+  // Status filter (only meaningful when bulk sheet loaded)
+  if (bulkData && statusFilter !== 'all') {
+    data = data.filter(r => r.status === statusFilter);
   }
 
   // Sort
@@ -890,11 +1389,22 @@ function renderSummaryStrip() {
   const pos1     = filteredResults.filter(r => r.clickPosition === 1).length;
   const oppCount = filteredResults.filter(r => r.conversionShare > r.clickShare).length;
 
+  let bulkStats = '';
+  if (bulkData) {
+    const newCount   = parsedResults.filter(r => r.status === 'new').length;
+    const addedCount = parsedResults.filter(r => r.status === 'added').length;
+    bulkStats = `
+      <div class="summary-stat new-badge"><strong>${fmtNum(newCount)}</strong><small>New keywords to add</small></div>
+      <div class="summary-stat"><strong>${fmtNum(addedCount)}</strong><small>Already in campaigns</small></div>
+    `;
+  }
+
   summaryStrip.innerHTML = `
     <div class="summary-stat"><strong>${fmtNum(total)}</strong><small>Keywords found</small></div>
     <div class="summary-stat"><strong>${fmtNum(bestSFR)}</strong><small>Best SFR (lowest)</small></div>
     <div class="summary-stat"><strong>${fmtNum(pos1)}</strong><small>#1 click position terms</small></div>
     <div class="summary-stat opp-badge"><strong>${fmtNum(oppCount)}</strong><small>Ranking opportunities (CVR &gt; CTR)</small></div>
+    ${bulkStats}
   `;
 }
 
@@ -934,6 +1444,7 @@ function renderTablePage() {
     tr.appendChild(tdNum(r.clickShare.toFixed(1) + '%'));
     tr.appendChild(tdNum(r.conversionShare.toFixed(1) + '%'));
     if (multipleAsins) tr.appendChild(tdText(r.asin));
+    if (bulkData)      tr.appendChild(tdStatus(r.status));
 
     frag.appendChild(tr);
   }
@@ -967,6 +1478,7 @@ showMoreBtn.addEventListener('click', () => {
     tr.appendChild(tdNum(r.clickShare.toFixed(1) + '%'));
     tr.appendChild(tdNum(r.conversionShare.toFixed(1) + '%'));
     if (multipleAsins) tr.appendChild(tdText(r.asin));
+    if (bulkData)      tr.appendChild(tdStatus(r.status));
     frag.appendChild(tr);
   }
   resultsTbody.appendChild(frag);
@@ -979,8 +1491,17 @@ showMoreBtn.addEventListener('click', () => {
   }
 });
 
-// Filter listener
+// Filter + status toggle listeners
 filterInput.addEventListener('input', () => applyFilterAndSort());
+
+statusToggle.querySelectorAll('button').forEach(btn => {
+  btn.addEventListener('click', () => {
+    statusToggle.querySelectorAll('button').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+    statusFilter = btn.dataset.val;
+    applyFilterAndSort();
+  });
+});
 
 // =============================================================================
 // TD HELPERS
@@ -1005,12 +1526,21 @@ function tdBadge(pos) {
   td.appendChild(span);
   return td;
 }
+function tdStatus(status) {
+  const td   = document.createElement('td');
+  if (!status) { td.textContent = '—'; return td; }
+  const span = document.createElement('span');
+  span.className = 'status-badge ' + (status === 'new' ? 'status-new' : 'status-dupe');
+  span.textContent = status === 'new' ? '+ New' : '✓ Added';
+  td.appendChild(span);
+  return td;
+}
 
 // =============================================================================
-// EXPORT CSV
+// EXPORT CSV — keyword suggestions (current filter/sort)
 // =============================================================================
 exportBtn.addEventListener('click', () => {
-  const cols = getColumns();
+  const cols   = getColumns();
   const header = cols.map(c => csvEsc(c.label.replace(' ⓘ', ''))).join(',');
   const rowLines = filteredResults.map(r => {
     const cells = [
@@ -1022,15 +1552,101 @@ exportBtn.addEventListener('click', () => {
       r.conversionShare.toFixed(2) + '%',
     ];
     if (multipleAsins) cells.push(csvEsc(r.asin));
+    if (bulkData)      cells.push(r.status || '');
     return cells.join(',');
   });
-  const csv = [header, ...rowLines].join('\r\n');
+  const csv  = [header, ...rowLines].join('\r\n');
+  downloadCsv(csv, 'keyword-harvest.csv');
+});
+
+// =============================================================================
+// BULK DOWNLOAD — Amazon Ads bulk upload format (new keywords only)
+// =============================================================================
+// Amazon Ads bulk upload required columns for adding SP keywords:
+// Product,Entity,Operation,Campaign ID,Ad Group ID,Campaign Name,Ad Group Name,
+// Start Date,End Date,Targeting Type,State,Daily Budget,SKU,Ad Group Default Bid,
+// Bid,Keyword Text,Match Type,Impressions,Clicks,Spend,Sales,Orders,Units,
+// Conversion Rate,Acos,CPC,CTR,ROAS
+// Minimum required for CREATE: Product,Entity,Operation,Campaign Name,Ad Group Name,
+//   State,Keyword Text,Match Type,Bid
+// =============================================================================
+bulkDownloadBtn.addEventListener('click', () => {
+  if (!bulkData) return;
+
+  // Collect all new keyword × ad group combinations
+  // One row per (keyword, adGroup, matchType)
+  // Default match types: add as Broad, Phrase, Exact — one row each
+  // (Amazon's bulk sheet expects one row per match type)
+  const MATCH_TYPES = ['broad', 'phrase', 'exact'];
+  const bulkRows = [];
+
+  // Deduplicate: same campaign+adGroup+keyword+matchType should appear once
+  const seen = new Set();
+
+  for (const r of parsedResults) {
+    if (r.status !== 'new') continue;
+
+    const adGroups = (r.adGroups && r.adGroups.length)
+      ? r.adGroups
+      : [{ campaign: 'UNKNOWN - map not found', adGroup: 'UNKNOWN', bid: 0.75 }];
+
+    for (const ag of adGroups) {
+      for (const mt of MATCH_TYPES) {
+        // Skip match types already in campaigns
+        const existKey = r.searchTerm.toLowerCase() + '|||' + mt;
+        if (bulkData.existingKeys.has(existKey)) continue;
+
+        const dedupeKey = ag.campaign + '||' + ag.adGroup + '||' + r.searchTerm + '||' + mt;
+        if (seen.has(dedupeKey)) continue;
+        seen.add(dedupeKey);
+
+        bulkRows.push({
+          campaign:  ag.campaign,
+          adGroup:   ag.adGroup,
+          keyword:   r.searchTerm,
+          matchType: mt.charAt(0).toUpperCase() + mt.slice(1),  // Broad/Phrase/Exact
+          bid:       ag.bid.toFixed(2),
+          asin:      r.asin,
+        });
+      }
+    }
+  }
+
+  if (!bulkRows.length) {
+    showError('No new keywords to download — all suggestions are already in your campaigns.');
+    return;
+  }
+
+  // Amazon Ads bulk upload header — SP keywords
+  const header = [
+    'Product','Entity','Operation',
+    'Campaign Name','Ad Group Name',
+    'State','Keyword Text','Match Type','Bid',
+  ].map(csvEsc).join(',');
+
+  const lines = bulkRows.map(row => [
+    csvEsc('Sponsored Products'),
+    csvEsc('Keyword'),
+    csvEsc('Create'),
+    csvEsc(row.campaign),
+    csvEsc(row.adGroup),
+    csvEsc('enabled'),
+    csvEsc(row.keyword),
+    csvEsc(row.matchType),
+    row.bid,
+  ].join(','));
+
+  const csv = [header, ...lines].join('\r\n');
+  downloadCsv(csv, 'bulk-keyword-upload.csv');
+});
+
+function downloadCsv(csv, filename) {
   const blob = new Blob(['\uFEFF' + csv], { type: 'text/csv;charset=utf-8;' });
   const url  = URL.createObjectURL(blob);
   const a    = document.createElement('a');
-  a.href = url; a.download = 'keyword-harvest.csv'; a.click();
+  a.href = url; a.download = filename; a.click();
   setTimeout(() => URL.revokeObjectURL(url), 1000);
-});
+}
 
 function csvEsc(v) {
   v = String(v);
