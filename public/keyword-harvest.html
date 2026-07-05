@@ -877,8 +877,12 @@ async function parseXlsx(arrayBuffer) {
   for (const sd of sheetDefs) {
     const target = relsMap.get(sd.rId);
     if (!target) continue;
-    // Target is relative to xl/, may start with "worksheets/" or "/xl/worksheets/"
-    const path = target.startsWith('/') ? target.slice(1) : 'xl/' + target;
+    // Target may be: "worksheets/sheet1.xml", "/xl/worksheets/sheet1.xml", "../worksheets/sheet1.xml"
+    let path;
+    if (target.startsWith('/xl/'))      path = target.slice(1);           // /xl/... → xl/...
+    else if (target.startsWith('../'))  path = 'xl/' + target.slice(3);   // ../worksheets/... → xl/worksheets/...
+    else if (target.startsWith('xl/'))  path = target;
+    else                                path = 'xl/' + target;
     const shXml = await extractZipEntry(arrayBuffer, entries, path);
     if (!shXml) continue;
     const rows = parseSheetXml(shXml, sstStrings);
@@ -905,20 +909,33 @@ async function parseBulkSheet(file) {
     sheetMap = await parseXlsx(buf);
   }
 
-  // Find the sheets we need — match by name fragment
-  const findSheet = (fragment) => {
+  // Find the sheets we need — match by name fragment (case-insensitive, normalised)
+  const sheetNames = [...sheetMap.keys()];
+  const findSheet = (...fragments) => {
     for (const [name, rows] of sheetMap) {
-      if (name.includes(fragment)) return rows;
+      const n = name.replace(/[^a-z0-9]/g, ' ');
+      if (fragments.every(f => n.includes(f))) return rows;
     }
     return null;
   };
 
-  const kwSheet  = findSheet('keyword');
-  const adSheet  = findSheet('product ad');
+  // Amazon uses: "Sponsored Products Keywords" and "Sponsored Products Product Ads"
+  // findSheet matches ALL fragments — so ('product','ads') won't match "Ad Groups"
+  const kwSheet = findSheet('keyword');
+  const adSheet = findSheet('product ads')   // exact "product ads"
+               || findSheet('product ad')    // "product ad" without s
+               || (() => {
+                    // last resort: contains "product" AND "ad" but NOT "group"
+                    for (const [name, rows] of sheetMap) {
+                      const n = name.replace(/[^a-z0-9]/g, ' ');
+                      if (n.includes('product') && n.includes(' ad') && !n.includes('group')) return rows;
+                    }
+                    return null;
+                  })();
 
   const warnings = [];
-  if (!kwSheet)  warnings.push('Could not find a "Sponsored Products Keywords" sheet — status column will be blank.');
-  if (!adSheet)  warnings.push('Could not find a "Sponsored Products Product Ads" sheet — campaign mapping unavailable.');
+  if (!kwSheet)  warnings.push(`Could not find Keywords sheet. Sheets found: ${sheetNames.join(', ') || 'none'}`);
+  if (!adSheet)  warnings.push(`Could not find Product Ads sheet. Sheets found: ${sheetNames.join(', ') || 'none'}`);
 
   // ── Parse keywords sheet ─────────────────────────────────────────────────
   // Columns we need: Entity, Campaign Name, Ad Group Name, Keyword, Match Type, Status
