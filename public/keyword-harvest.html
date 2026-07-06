@@ -764,43 +764,43 @@ async function extractZipEntry(buf, entries, name) {
 
 // ── Parse an XLSX sheet XML into a 2D array of string values ────────────────
 // Handles shared strings table (sst) and inline strings.
+// Amazon bulk sheets use t="inlineStr" exclusively with <is><t>value</t></is>.
 function parseSheetXml(xml, sstStrings) {
-  const rows = [];
-  // Iterate <row> elements
+  const rows   = [];
   const rowRe  = /<row\b[^>]*>([\s\S]*?)<\/row>/g;
   const cellRe = /<c\b([^>]*)>([\s\S]*?)<\/c>/g;
   const vRe    = /<v>([\s\S]*?)<\/v>/;
-  const isRe   = /<is>[\s\S]*?<t>([\s\S]*?)<\/t>[\s\S]*?<\/is>/;
-  const rAttr  = /\br="([A-Z]+)(\d+)"/;
+  const tTagRe = /<t[^>]*>([\s\S]*?)<\/t>/g;  // matches ALL <t> tags (rich text)
+  const rAttr  = /\br="([A-Z]+)/;
   const tAttr  = /\bt="([^"]+)"/;
 
   let rowMatch;
   while ((rowMatch = rowRe.exec(xml)) !== null) {
-    const rowXml  = rowMatch[1];
-    const rowArr  = [];
+    const rowXml = rowMatch[1];
+    const rowArr = [];
     let   cellMatch;
     cellRe.lastIndex = 0;
     while ((cellMatch = cellRe.exec(rowXml)) !== null) {
       const attrs    = cellMatch[1];
       const inner    = cellMatch[2];
       const rM       = rAttr.exec(attrs);
-      const colLetter= rM ? rM[1] : null;
-      const colIdx   = colLetter ? colLetterToIndex(colLetter) : rowArr.length;
+      const colIdx   = rM ? colLetterToIndex(rM[1]) : rowArr.length;
       const tM       = tAttr.exec(attrs);
       const cellType = tM ? tM[1] : 'n';
       let   val      = '';
       if (cellType === 's') {
-        // shared string index
         const vM = vRe.exec(inner);
         if (vM) val = sstStrings[parseInt(vM[1])] || '';
       } else if (cellType === 'inlineStr') {
-        const isM = isRe.exec(inner);
-        if (isM) val = isM[1];
+        // Concatenate ALL <t> segments (handles rich text runs)
+        const parts = []; let m;
+        tTagRe.lastIndex = 0;
+        while ((m = tTagRe.exec(inner)) !== null) parts.push(m[1]);
+        val = parts.join('');
       } else {
         const vM = vRe.exec(inner);
         if (vM) val = vM[1];
       }
-      // Ensure rowArr is long enough
       while (rowArr.length <= colIdx) rowArr.push('');
       rowArr[colIdx] = xmlDecode(val);
     }
@@ -909,8 +909,12 @@ async function parseBulkSheet(file) {
     sheetMap = await parseXlsx(buf);
   }
 
-  // Find the sheets we need — match by name fragment (case-insensitive, normalised)
+  // ── Find the main SP Campaigns sheet ────────────────────────────────────
+  // Amazon's bulk sheet puts ALL entity types (Campaign, Ad Group, Keyword,
+  // Product Ad, etc.) into ONE sheet: "Sponsored Products Campaigns".
+  // We scan it once and branch on the Entity column value.
   const sheetNames = [...sheetMap.keys()];
+
   const findSheet = (...fragments) => {
     for (const [name, rows] of sheetMap) {
       const n = name.replace(/[^a-z0-9]/g, ' ');
@@ -919,105 +923,111 @@ async function parseBulkSheet(file) {
     return null;
   };
 
-  // Amazon uses: "Sponsored Products Keywords" and "Sponsored Products Product Ads"
-  // findSheet matches ALL fragments — so ('product','ads') won't match "Ad Groups"
-  const kwSheet = findSheet('keyword');
-  const adSheet = findSheet('product ads')   // exact "product ads"
-               || findSheet('product ad')    // "product ad" without s
-               || (() => {
-                    // last resort: contains "product" AND "ad" but NOT "group"
-                    for (const [name, rows] of sheetMap) {
-                      const n = name.replace(/[^a-z0-9]/g, ' ');
-                      if (n.includes('product') && n.includes(' ad') && !n.includes('group')) return rows;
-                    }
-                    return null;
-                  })();
+  // Primary sheet: "Sponsored Products Campaigns" (contains all SP entity rows)
+  const spSheet = findSheet('sponsored products campaigns')
+               || findSheet('sponsored products')
+               || findSheet('sp campaigns')
+               || (sheetMap.size ? [...sheetMap.values()][0] : null);
 
   const warnings = [];
-  if (!kwSheet)  warnings.push(`Could not find Keywords sheet. Sheets found: ${sheetNames.join(', ') || 'none'}`);
-  if (!adSheet)  warnings.push(`Could not find Product Ads sheet. Sheets found: ${sheetNames.join(', ') || 'none'}`);
-
-  // ── Parse keywords sheet ─────────────────────────────────────────────────
-  // Columns we need: Entity, Campaign Name, Ad Group Name, Keyword, Match Type, Status
-  // Key index by header row (first row)
-  const existingKeys  = new Set();   // "keyword|||matchtype" for fast lookup
-  const adGroupBids   = new Map();   // adGroupKey → defaultBid
-  const adGroupMeta   = new Map();   // adGroupKey → { campaign, adGroup }
-
-  if (kwSheet && kwSheet.length > 1) {
-    const hdr  = kwSheet[0].map(h => (h || '').toLowerCase().trim());
-    const iEnt = hdr.findIndex(h => h === 'entity' || h.includes('entity'));
-    const iCam = hdr.findIndex(h => h.includes('campaign name') || h === 'campaign');
-    const iAG  = hdr.findIndex(h => h.includes('ad group name') || h === 'ad group');
-    const iKW  = hdr.findIndex(h => h === 'keyword' || h.includes('keyword text'));
-    const iMT  = hdr.findIndex(h => h.includes('match type'));
-    const iSt  = hdr.findIndex(h => h === 'state' || h === 'status');
-    const iBid = hdr.findIndex(h => h.includes('bid') && !h.includes('budget'));
-
-    for (let i = 1; i < kwSheet.length; i++) {
-      const row = kwSheet[i];
-      // Only process keyword rows (Entity column = "Keyword"), skip paused if desired
-      const ent = iEnt >= 0 ? (row[iEnt] || '').toLowerCase() : '';
-      if (iEnt >= 0 && ent && !ent.includes('keyword')) continue;
-      const state = iSt >= 0 ? (row[iSt] || '').toLowerCase() : '';
-      if (state === 'archived') continue;
-
-      const kw = (iKW >= 0 ? row[iKW] : '').trim().toLowerCase();
-      const mt = (iMT >= 0 ? row[iMT] : '').trim().toLowerCase() || 'broad';
-      if (!kw) continue;
-
-      existingKeys.add(kw + '|||' + mt);
-
-      // Also collect ad group bid
-      const cam = iCam >= 0 ? (row[iCam] || '').trim() : '';
-      const ag  = iAG  >= 0 ? (row[iAG]  || '').trim() : '';
-      if (cam && ag && iBid >= 0) {
-        const key = cam + '|||' + ag;
-        const bid = parseFloat(row[iBid]);
-        if (!isNaN(bid) && !adGroupBids.has(key)) {
-          adGroupBids.set(key, bid);
-          adGroupMeta.set(key, { campaign: cam, adGroup: ag });
-        }
-      }
-    }
+  if (!spSheet) {
+    warnings.push(`Could not find Sponsored Products sheet. Sheets found: ${sheetNames.join(', ') || 'none — XLSX may have failed to parse'}`);
   }
 
-  // ── Parse product ads sheet ──────────────────────────────────────────────
-  // Columns: Entity, Campaign Name, Ad Group Name, ASIN / SKU, State
+  const existingKeys  = new Set();   // "keyword|||matchtype"
+  const adGroupBids   = new Map();   // adGroupKey → bid
+  const adGroupMeta   = new Map();   // adGroupKey → { campaign, adGroup }
   const asinToAdGroups = new Map();  // ASIN → Set<adGroupKey>
 
-  if (adSheet && adSheet.length > 1) {
-    const hdr  = adSheet[0].map(h => (h || '').toLowerCase().trim());
-    const iEnt = hdr.findIndex(h => h.includes('entity'));
-    const iCam = hdr.findIndex(h => h.includes('campaign name') || h === 'campaign');
-    const iAG  = hdr.findIndex(h => h.includes('ad group name') || h === 'ad group');
-    const iSKU = hdr.findIndex(h => h.includes('sku') || h.includes('asin'));
-    const iSt  = hdr.findIndex(h => h === 'state' || h === 'status');
-    const iBid = hdr.findIndex(h => h.includes('bid') && !h.includes('budget'));
+  if (spSheet && spSheet.length > 1) {
+    const hdr = spSheet[0].map(h => (h || '').toLowerCase().trim());
 
-    for (let i = 1; i < adSheet.length; i++) {
-      const row  = adSheet[i];
-      const ent  = iEnt >= 0 ? (row[iEnt] || '').toLowerCase() : '';
-      if (iEnt >= 0 && ent && !ent.includes('product ad')) continue;
-      const state = iSt >= 0 ? (row[iSt] || '').toLowerCase() : '';
-      if (state === 'archived') continue;
+    // Column indices — using the exact names from the real bulk sheet
+    const iEnt  = hdr.findIndex(h => h === 'entity');
+    const iSt   = hdr.findIndex(h => h === 'state');
 
-      const sku = (iSKU >= 0 ? row[iSKU] : '').trim().toUpperCase();
-      if (!sku) continue;
-      const cam = iCam >= 0 ? (row[iCam] || '').trim() : '';
-      const ag  = iAG  >= 0 ? (row[iAG]  || '').trim() : '';
-      if (!cam || !ag) continue;
+    // Campaign/Ad Group names: bulk sheet has editable (J/K) + informational (L/M).
+    // For Keyword and Product Ad rows, J/K are blank — only L/M are filled.
+    // So prefer informational columns when available.
+    const iCamEdit = hdr.findIndex(h => h === 'campaign name');
+    const iAGEdit  = hdr.findIndex(h => h === 'ad group name');
+    const iCamInfo = hdr.findIndex(h => h === 'campaign name (informational only)');
+    const iAGInfo  = hdr.findIndex(h => h === 'ad group name (informational only)');
 
-      const agKey = cam + '|||' + ag;
-      if (!asinToAdGroups.has(sku)) asinToAdGroups.set(sku, new Set());
-      asinToAdGroups.get(sku).add(agKey);
+    // Keyword columns
+    const iKW   = hdr.findIndex(h => h === 'keyword text');
+    const iMT   = hdr.findIndex(h => h === 'match type');
+    const iBid  = hdr.findIndex(h => h === 'bid');
 
-      // If the product ads sheet has a bid column, use it as fallback ad group bid
-      if (iBid >= 0 && !adGroupBids.has(agKey)) {
-        const bid = parseFloat(row[iBid]);
-        if (!isNaN(bid)) adGroupBids.set(agKey, bid);
+    // Product Ad columns — ASIN (col W) takes priority over SKU (col V)
+    const iASIN = hdr.findIndex(h => h === 'asin');
+    const iSKU  = hdr.findIndex(h => h === 'sku');
+
+    // Ad Group default bid
+    const iAGBid = hdr.findIndex(h => h === 'ad group default bid' || h === 'ad group default bid (informational only)');
+
+    const getCamAG = (row) => {
+      // Use informational cols first (always populated), fall back to editable
+      const cam = (iCamInfo >= 0 ? row[iCamInfo] : '') || (iCamEdit >= 0 ? row[iCamEdit] : '') || '';
+      const ag  = (iAGInfo  >= 0 ? row[iAGInfo]  : '') || (iAGEdit  >= 0 ? row[iAGEdit]  : '') || '';
+      return { cam: cam.trim(), ag: ag.trim() };
+    };
+
+    for (let i = 1; i < spSheet.length; i++) {
+      const row   = spSheet[i];
+      const ent   = (iEnt >= 0 ? row[iEnt] : '').trim();
+      const state = (iSt  >= 0 ? row[iSt]  : '').trim().toLowerCase();
+      if (state === 'archived') continue;  // archived = deleted; paused still counts
+
+      if (ent === 'Keyword') {
+        const kw = (iKW >= 0 ? row[iKW] : '').trim().toLowerCase();
+        const mt = (iMT >= 0 ? row[iMT] : '').trim().toLowerCase() || 'broad';
+        if (!kw) continue;
+
+        // Record as existing regardless of paused/enabled —
+        // a paused keyword is still targeting, just not spending
+        existingKeys.add(kw + '|||' + mt);
+
+        const { cam, ag } = getCamAG(row);
+        if (cam && ag) {
+          const agKey = cam + '|||' + ag;
+          const bid   = parseFloat(iBid >= 0 ? row[iBid] : '');
+          if (!isNaN(bid) && !adGroupBids.has(agKey)) {
+            adGroupBids.set(agKey, bid);
+            adGroupMeta.set(agKey, { campaign: cam, adGroup: ag });
+          } else if (!adGroupMeta.has(agKey)) {
+            adGroupMeta.set(agKey, { campaign: cam, adGroup: ag });
+          }
+        }
       }
-      if (!adGroupMeta.has(agKey)) adGroupMeta.set(agKey, { campaign: cam, adGroup: ag });
+
+      if (ent === 'Product Ad') {
+        const asin = (iASIN >= 0 ? row[iASIN] : '').trim().toUpperCase()
+                  || (iSKU  >= 0 ? row[iSKU]  : '').trim().toUpperCase();
+        if (!asin) continue;
+
+        const { cam, ag } = getCamAG(row);
+        if (!cam || !ag) continue;
+
+        const agKey = cam + '|||' + ag;
+        if (!asinToAdGroups.has(asin)) asinToAdGroups.set(asin, new Set());
+        asinToAdGroups.get(asin).add(agKey);
+
+        // Use ad group default bid for the bulk download
+        const agBid = parseFloat(iAGBid >= 0 ? row[iAGBid] : '') || parseFloat(iBid >= 0 ? row[iBid] : '');
+        if (!isNaN(agBid) && !adGroupBids.has(agKey)) adGroupBids.set(agKey, agBid);
+        if (!adGroupMeta.has(agKey)) adGroupMeta.set(agKey, { campaign: cam, adGroup: ag });
+      }
+
+      if (ent === 'Ad Group') {
+        // Harvest ad group default bid from ad group rows directly
+        const { cam, ag } = getCamAG(row);
+        if (!cam || !ag) continue;
+        const agKey = cam + '|||' + ag;
+        const defBid = parseFloat(iAGBid >= 0 ? row[iAGBid] : '');
+        if (!isNaN(defBid) && !adGroupBids.has(agKey)) adGroupBids.set(agKey, defBid);
+        if (!adGroupMeta.has(agKey)) adGroupMeta.set(agKey, { campaign: cam, adGroup: ag });
+      }
     }
   }
 
