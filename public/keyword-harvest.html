@@ -5,246 +5,302 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Keyword Harvest — Reverse-ASIN Lookup</title>
 <style>
-  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
+:root {
+  --bg: #ffffff;
+  --surface: #f7f8fa;
+  --border: #e5e7eb;
+  --text: #1f2328;
+  --muted: #57606a;
+  --accent: #3b82d4;
+  --accent-hover: #2563eb;
+  --green: #16a34a;
+  --green-bg: #f0fdf4;
+  --green-border: #bbf7d0;
+  --red: #dc2626;
+  --yellow: #d97706;
+  --badge1: #1d4ed8;
+  --badge2: #7c3aed;
+  --badge3: #0369a1;
+  --font: -apple-system, "Segoe UI", system-ui, sans-serif;
+  --tab-active-bg: #ffffff;
+  --tab-bar-bg: #f3f4f6;
+  --radius: 8px;
+}
+
+@media (prefers-color-scheme: dark) {
   :root {
-    --bg: #ffffff;
-    --surface: #f7f8fa;
-    --border: #e5e7eb;
-    --text: #1f2328;
-    --muted: #57606a;
-    --accent: #3b82d4;
-    --green-bg: #f0fdf4;
-    --green-border: #bbf7d0;
-    --red: #dc2626;
-    --badge1: #1d4ed8;
-    --badge2: #7c3aed;
-    --badge3: #0369a1;
-    --font: -apple-system, "Segoe UI", system-ui, sans-serif;
+    --bg: #0d1117;
+    --surface: #161b22;
+    --border: #30363d;
+    --text: #e6edf3;
+    --muted: #8b949e;
+    --green-bg: #0d2818;
+    --green-border: #166534;
+    --tab-active-bg: #0d1117;
+    --tab-bar-bg: #161b22;
   }
+}
 
-  @media (prefers-color-scheme: dark) {
-    :root {
-      --bg: #0d1117;
-      --surface: #161b22;
-      --border: #30363d;
-      --text: #e6edf3;
-      --muted: #8b949e;
-      --green-bg: #0d2818;
-      --green-border: #166534;
-    }
-  }
+body { font-family: var(--font); font-size: 14px; line-height: 1.6; color: var(--text); background: var(--bg); }
 
-  body { font-family: var(--font); font-size: 14px; line-height: 1.6; color: var(--text); background: var(--bg); }
+.container { max-width: 1080px; margin: 0 auto; padding: 24px 20px 64px; }
 
-  .container { max-width: 860px; margin: 0 auto; padding: 24px 16px 64px; }
+/* ── Header ── */
+.header { border-bottom: 1px solid var(--border); padding-bottom: 16px; margin-bottom: 28px; }
+.header h1 { font-size: 20px; font-weight: 700; }
+.header p  { color: var(--muted); margin-top: 4px; font-size: 13px; }
+.privacy-note { display: inline-block; margin-top: 6px; background: var(--surface); border: 1px solid var(--border); border-radius: 4px; padding: 4px 10px; font-size: 12px; color: var(--muted); }
 
-  /* Header */
-  .header { border-bottom: 1px solid var(--border); padding-bottom: 16px; margin-bottom: 24px; }
-  .header h1 { font-size: 20px; font-weight: 700; }
-  .header p { color: var(--muted); margin-top: 4px; font-size: 13px; }
-  .privacy-note { display: inline-block; margin-top: 6px; background: var(--surface); border: 1px solid var(--border); border-radius: 4px; padding: 4px 10px; font-size: 12px; color: var(--muted); }
+/* ── Section label ── */
+.section-label { font-weight: 600; font-size: 13px; margin-bottom: 8px; display: block; }
 
-  /* Section labels */
-  .section-label { font-weight: 600; font-size: 13px; margin-bottom: 8px; display: block; }
+/* ── Drop zone ── */
+.drop-zone {
+  border: 2px dashed var(--border); border-radius: var(--radius); padding: 28px 24px;
+  text-align: center; cursor: pointer; background: var(--surface);
+  transition: border-color 0.15s, background 0.15s; margin-bottom: 12px;
+}
+.drop-zone.drag-over { border-color: var(--accent); background: #eff6ff; }
+.drop-zone input[type=file] { display: none; }
+.drop-zone-icon { font-size: 28px; margin-bottom: 6px; }
+.drop-zone-text { color: var(--muted); font-size: 13px; }
+.drop-zone-text strong { color: var(--accent); cursor: pointer; }
 
-  /* Drop zone */
-  .drop-zone {
-    border: 2px dashed var(--border); border-radius: 8px; padding: 36px 24px;
-    text-align: center; cursor: pointer; background: var(--surface);
-    transition: border-color 0.15s, background 0.15s;
-    margin-bottom: 16px;
-  }
-  .drop-zone.drag-over { border-color: var(--accent); background: #eff6ff; }
-  .drop-zone input[type=file] { display: none; }
-  .drop-zone-icon { font-size: 32px; margin-bottom: 8px; }
-  .drop-zone-text { color: var(--muted); font-size: 13px; }
-  .drop-zone-text strong { color: var(--accent); cursor: pointer; }
+/* ── File info / progress ── */
+.file-info { background: var(--surface); border: 1px solid var(--border); border-radius: 6px; padding: 12px 16px; margin-bottom: 12px; display: none; }
+.file-name  { font-weight: 600; }
+.file-meta  { color: var(--muted); font-size: 12px; margin-top: 2px; }
+.progress-wrap { margin-top: 10px; }
+.progress-bar-track { background: var(--border); border-radius: 99px; height: 6px; overflow: hidden; }
+.progress-bar-fill  { height: 100%; background: var(--accent); border-radius: 99px; width: 0; transition: width 0.1s; }
+.progress-text  { font-size: 12px; color: var(--muted); margin-top: 4px; }
+.parse-summary  { font-size: 13px; color: var(--text); margin-top: 8px; font-weight: 500; }
 
-  /* Progress */
-  .file-info { background: var(--surface); border: 1px solid var(--border); border-radius: 6px; padding: 12px 16px; margin-bottom: 16px; display: none; }
-  .file-name { font-weight: 600; }
-  .file-meta { color: var(--muted); font-size: 12px; margin-top: 2px; }
-  .progress-wrap { margin-top: 10px; }
-  .progress-bar-track { background: var(--border); border-radius: 99px; height: 6px; overflow: hidden; }
-  .progress-bar-fill { height: 100%; background: var(--accent); border-radius: 99px; width: 0; transition: width 0.1s; }
-  .progress-text { font-size: 12px; color: var(--muted); margin-top: 4px; }
-  .parse-summary { font-size: 13px; color: var(--text); margin-top: 8px; font-weight: 500; }
+/* ── ASIN input ── */
+.asin-section { margin-bottom: 20px; }
+textarea#asin-input {
+  width: 100%; min-height: 64px; padding: 10px 12px;
+  border: 1px solid var(--border); border-radius: 6px;
+  font-family: var(--font); font-size: 13px; background: var(--bg); color: var(--text); resize: vertical;
+}
+textarea#asin-input:focus { outline: 2px solid var(--accent); outline-offset: -1px; }
+.asin-tags { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; min-height: 24px; }
+.asin-tag { padding: 2px 10px; border-radius: 99px; font-size: 12px; font-weight: 600; font-family: monospace; border: 1px solid; }
+.asin-tag.valid   { background: #eff6ff; border-color: #93c5fd; color: #1d4ed8; }
+.asin-tag.invalid { background: #fef2f2; border-color: #fca5a5; color: var(--red); }
 
-  /* ASIN input */
-  .asin-section { margin-bottom: 20px; }
-  textarea#asin-input {
-    width: 100%; min-height: 70px; padding: 10px 12px;
-    border: 1px solid var(--border); border-radius: 6px;
-    font-family: var(--font); font-size: 13px; background: var(--bg); color: var(--text);
-    resize: vertical;
-  }
-  textarea#asin-input:focus { outline: 2px solid var(--accent); outline-offset: -1px; }
-  .asin-tags { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; min-height: 24px; }
-  .asin-tag { padding: 2px 10px; border-radius: 99px; font-size: 12px; font-weight: 600; font-family: monospace; border: 1px solid; }
-  .asin-tag.valid { background: #eff6ff; border-color: #93c5fd; color: #1d4ed8; }
-  .asin-tag.invalid { background: #fef2f2; border-color: #fca5a5; color: var(--red); }
+/* ── Calibration ── */
+.calibration { border: 1px solid var(--border); border-radius: 6px; margin-bottom: 20px; }
+.calibration summary { padding: 10px 14px; cursor: pointer; font-size: 13px; font-weight: 600; color: var(--muted); list-style: none; display: flex; align-items: center; gap: 6px; }
+.calibration summary::before { content: "▶"; font-size: 10px; transition: transform 0.15s; }
+.calibration[open] summary::before { transform: rotate(90deg); }
+.calibration-body { padding: 12px 14px; border-top: 1px solid var(--border); display: flex; gap: 24px; flex-wrap: wrap; }
+.cal-field label { font-size: 12px; color: var(--muted); display: block; margin-bottom: 3px; }
+.cal-field input  { width: 120px; padding: 5px 8px; border: 1px solid var(--border); border-radius: 4px; font-size: 13px; background: var(--bg); color: var(--text); }
+.cal-field small  { display: block; font-size: 11px; color: var(--muted); margin-top: 2px; }
 
-  /* Calibration panel */
-  .calibration { border: 1px solid var(--border); border-radius: 6px; margin-bottom: 20px; }
-  .calibration summary { padding: 10px 14px; cursor: pointer; font-size: 13px; font-weight: 600; color: var(--muted); list-style: none; display: flex; align-items: center; gap: 6px; }
-  .calibration summary::before { content: "▶"; font-size: 10px; transition: transform 0.15s; }
-  .calibration[open] summary::before { transform: rotate(90deg); }
-  .calibration-body { padding: 12px 14px; border-top: 1px solid var(--border); display: flex; gap: 24px; flex-wrap: wrap; }
-  .cal-field label { font-size: 12px; color: var(--muted); display: block; margin-bottom: 3px; }
-  .cal-field input { width: 120px; padding: 5px 8px; border: 1px solid var(--border); border-radius: 4px; font-size: 13px; background: var(--bg); color: var(--text); }
-  .cal-field small { display: block; font-size: 11px; color: var(--muted); margin-top: 2px; }
+/* ── Bulk info ── */
+.bulk-info { background: var(--surface); border: 1px solid var(--border); border-radius: 6px; padding: 10px 14px; margin-bottom: 12px; font-size: 13px; display: none; }
+.bulk-info .bulk-name    { font-weight: 600; }
+.bulk-info .bulk-meta    { color: var(--muted); font-size: 12px; }
+.bulk-info .bulk-summary { margin-top: 4px; color: var(--text); }
 
-  /* Bulk upload section */
-  .bulk-info { background: var(--surface); border: 1px solid var(--border); border-radius: 6px; padding: 10px 14px; margin-bottom: 16px; font-size: 13px; display: none; }
-  .bulk-info .bulk-name { font-weight: 600; }
-  .bulk-info .bulk-meta { color: var(--muted); font-size: 12px; }
-  .bulk-info .bulk-summary { margin-top: 6px; color: var(--text); }
+/* ── Run button ── */
+#run-btn {
+  width: 100%; padding: 11px 0; background: var(--accent); color: #fff;
+  border: none; border-radius: var(--radius); font-size: 14px; font-weight: 700;
+  cursor: pointer; margin-bottom: 8px; letter-spacing: 0.01em;
+}
+#run-btn:disabled { opacity: 0.42; cursor: not-allowed; }
+#run-btn:not(:disabled):hover { background: var(--accent-hover); }
 
-  /* Status badges */
-  .status-badge { display: inline-block; padding: 1px 8px; border-radius: 99px; font-size: 11px; font-weight: 600; border: 1px solid; }
-  .status-new  { background: #f0fdf4; border-color: #86efac; color: #16a34a; }
-  .status-dupe { background: var(--surface); border-color: var(--border); color: var(--muted); }
+/* ── Error banner ── */
+.error-banner { background: #fef2f2; border: 1px solid #fca5a5; color: var(--red); border-radius: 6px; padding: 10px 14px; font-size: 13px; margin-bottom: 16px; display: none; }
+.error-banner ul { margin: 6px 0 0 18px; }
 
-  /* Filter toggle pills */
-  .filter-toggle { display: flex; gap: 4px; }
-  .filter-toggle button {
-    padding: 5px 12px; border: 1px solid var(--border); border-radius: 99px;
-    font-size: 12px; cursor: pointer; background: var(--bg); color: var(--muted);
-  }
-  .filter-toggle button.active { background: var(--accent); border-color: var(--accent); color: #fff; }
+/* ── Results section ── */
+#results-section { display: none; margin-top: 32px; }
 
-  /* Run button */
-  #run-btn {
-    display: block; width: 100%; padding: 11px; border: none;
-    background: var(--accent); color: #fff; font-size: 14px; font-weight: 600;
-    border-radius: 6px; cursor: pointer; transition: opacity 0.15s;
-    margin-bottom: 24px;
-  }
-  #run-btn:disabled { opacity: 0.45; cursor: not-allowed; }
-  #run-btn:not(:disabled):hover { opacity: 0.88; }
+/* ── Summary strip ── */
+.summary-strip { display: flex; gap: 16px; flex-wrap: wrap; margin-bottom: 20px; padding: 14px 16px; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); }
+.summary-stat strong { font-size: 16px; display: block; font-weight: 700; }
+.summary-stat small  { color: var(--muted); font-size: 11px; }
+.summary-stat.green  strong { color: var(--green); }
+.summary-stat.blue   strong { color: var(--accent); }
+.summary-stat.amber  strong { color: var(--yellow); }
 
-  /* Section divider */
-  .output-section { margin-top: 36px; }
-  .output-heading {
-    font-size: 14px; font-weight: 700; margin-bottom: 12px;
-    padding-bottom: 8px; border-bottom: 2px solid var(--border);
-    display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 8px;
-  }
-  .output-heading span { color: var(--muted); font-weight: 400; font-size: 12px; }
+/* ══════════════════════════════════════════════════════
+   OUTER TABS  (Branded / Generic / Competitor)
+══════════════════════════════════════════════════════ */
+.outer-tabs-bar {
+  display: flex; gap: 0; border-bottom: 2px solid var(--border); margin-bottom: 0;
+}
+.outer-tab-btn {
+  padding: 9px 20px; border: none; background: none; cursor: pointer;
+  font-size: 14px; font-weight: 600; color: var(--muted);
+  border-bottom: 2px solid transparent; margin-bottom: -2px;
+  transition: color 0.12s, border-color 0.12s;
+  display: flex; align-items: center; gap: 6px;
+}
+.outer-tab-btn:hover { color: var(--text); }
+.outer-tab-btn.active { color: var(--accent); border-bottom-color: var(--accent); }
+.outer-tab-count {
+  display: inline-flex; align-items: center; justify-content: center;
+  min-width: 20px; height: 18px; padding: 0 5px;
+  background: var(--surface); border: 1px solid var(--border);
+  border-radius: 99px; font-size: 11px; font-weight: 700;
+}
+.outer-tab-btn.active .outer-tab-count { background: #dbeafe; border-color: #93c5fd; color: var(--accent); }
 
-  /* Rationale pill */
-  .rationale { font-size: 11px; color: var(--muted); line-height: 1.4; }
-  .rationale strong { color: var(--accent); }
+.outer-tab-panel { display: none; padding-top: 16px; }
+.outer-tab-panel.active { display: block; }
 
-  /* Bulk download button */
-  .btn-green {
-    padding: 7px 16px; background: #16a34a; border: none;
-    border-radius: 5px; font-size: 13px; font-weight: 600;
-    cursor: pointer; color: #fff; white-space: nowrap;
-  }
-  .btn-green:disabled { opacity: 0.4; cursor: not-allowed; }
-  .btn-green:not(:disabled):hover { opacity: 0.88; }
-  #bulk-download-btn { padding: 7px 16px; background: #16a34a; border: none; border-radius: 5px; font-size: 13px; font-weight: 600; cursor: pointer; color: #fff; white-space: nowrap; }
-  #bulk-download-btn:disabled { opacity: 0.4; cursor: not-allowed; }
-  #bulk-download-btn:not(:disabled):hover { opacity: 0.88; }
+/* ══════════════════════════════════════════════════════
+   INNER TABS  (Not Added / Added)
+══════════════════════════════════════════════════════ */
+.inner-tabs-bar {
+  display: flex; gap: 4px; margin-bottom: 14px;
+}
+.inner-tab-btn {
+  padding: 6px 16px; border: 1px solid var(--border); background: var(--surface);
+  cursor: pointer; font-size: 13px; font-weight: 600; color: var(--muted);
+  border-radius: 6px; transition: all 0.12s;
+  display: flex; align-items: center; gap: 6px;
+}
+.inner-tab-btn:hover { border-color: var(--accent); color: var(--text); }
+.inner-tab-btn.active { background: var(--accent); border-color: var(--accent); color: #fff; }
+.inner-tab-btn.active .inner-tab-count { background: rgba(255,255,255,0.25); border-color: transparent; color: #fff; }
+.inner-tab-count {
+  display: inline-flex; align-items: center; justify-content: center;
+  min-width: 18px; height: 16px; padding: 0 4px;
+  background: var(--bg); border: 1px solid var(--border);
+  border-radius: 99px; font-size: 10px; font-weight: 700;
+}
 
-  /* Error banner */
-  .error-banner { background: #fef2f2; border: 1px solid #fca5a5; color: var(--red); border-radius: 6px; padding: 10px 14px; font-size: 13px; margin-bottom: 16px; display: none; }
-  .error-banner ul { margin: 6px 0 0 18px; }
+.inner-tab-panel { display: none; }
+.inner-tab-panel.active { display: block; }
 
-  /* Results section */
-  #results-section { display: none; }
+/* ══════════════════════════════════════════════════════
+   TABLE TOOLBAR
+══════════════════════════════════════════════════════ */
+.table-toolbar {
+  display: flex; gap: 8px; align-items: center; margin-bottom: 10px; flex-wrap: wrap;
+}
+.toolbar-search {
+  flex: 1; min-width: 180px; padding: 7px 10px;
+  border: 1px solid var(--border); border-radius: 5px;
+  font-size: 13px; background: var(--bg); color: var(--text);
+}
+.toolbar-search:focus { outline: 2px solid var(--accent); outline-offset: -1px; }
+.btn-outline {
+  padding: 6px 14px; background: var(--bg); border: 1px solid var(--border);
+  border-radius: 5px; font-size: 12px; font-weight: 600; cursor: pointer;
+  color: var(--text); white-space: nowrap;
+}
+.btn-outline:hover { border-color: var(--accent); color: var(--accent); }
+.btn-green-sm {
+  padding: 6px 14px; background: var(--green); border: none;
+  border-radius: 5px; font-size: 12px; font-weight: 600; cursor: pointer;
+  color: #fff; white-space: nowrap;
+}
+.btn-green-sm:disabled { opacity: 0.4; cursor: not-allowed; }
+.btn-green-sm:not(:disabled):hover { opacity: 0.88; }
 
-  .summary-strip {
-    background: var(--surface); border: 1px solid var(--border); border-radius: 6px;
-    padding: 10px 16px; display: flex; flex-wrap: wrap; gap: 16px;
-    margin-bottom: 12px; font-size: 13px;
-  }
-  .summary-stat strong { font-size: 15px; display: block; }
-  .summary-stat small { color: var(--muted); font-size: 11px; }
-  .opp-badge { color: #16a34a; }
-  .new-badge  { color: #3b82d4; }
+/* ══════════════════════════════════════════════════════
+   TABLE
+══════════════════════════════════════════════════════ */
+.table-wrap { overflow-x: auto; border: 1px solid var(--border); border-radius: var(--radius); }
+table { width: 100%; border-collapse: collapse; font-size: 13px; }
+thead th {
+  padding: 9px 12px; text-align: left; font-size: 12px; font-weight: 600;
+  color: var(--muted); background: var(--surface); border-bottom: 1px solid var(--border);
+  white-space: nowrap; cursor: pointer; user-select: none;
+}
+thead th:hover { color: var(--accent); }
+thead th .sort-arrow { font-size: 10px; margin-left: 3px; opacity: 0.5; }
+thead th.sorted .sort-arrow { opacity: 1; color: var(--accent); }
+tbody tr { border-bottom: 1px solid var(--border); transition: background 0.08s; }
+tbody tr:last-child { border-bottom: none; }
+tbody tr:hover { background: var(--surface); }
+tbody tr.opp-row { background: var(--green-bg); }
+tbody td { padding: 9px 12px; vertical-align: middle; }
+td.kw-cell  { max-width: 220px; word-break: break-word; }
+td.num-cell { text-align: right; font-variant-numeric: tabular-nums; }
+td.mono     { font-family: monospace; font-size: 12px; white-space: nowrap; }
+td.muted    { color: var(--muted); font-size: 12px; }
 
-  /* Filter + export row */
-  .table-toolbar { display: flex; gap: 10px; align-items: center; margin-bottom: 10px; flex-wrap: wrap; }
-  .table-toolbar input[type=text] {
-    flex: 1; min-width: 160px; padding: 7px 10px;
-    border: 1px solid var(--border); border-radius: 5px;
-    font-size: 13px; background: var(--bg); color: var(--text);
-  }
-  .table-toolbar input[type=text]:focus { outline: 2px solid var(--accent); outline-offset: -1px; }
-  #export-btn {
-    padding: 7px 16px; background: var(--surface); border: 1px solid var(--border);
-    border-radius: 5px; font-size: 13px; cursor: pointer; color: var(--text); white-space: nowrap;
-  }
-  #export-btn:hover { border-color: var(--accent); }
+/* ── Badges ── */
+.pos-badge  { display: inline-block; padding: 1px 7px; border-radius: 99px; font-size: 11px; font-weight: 700; color: #fff; white-space: nowrap; }
+.pos-1 { background: var(--badge1); }
+.pos-2 { background: var(--badge2); }
+.pos-3 { background: var(--badge3); }
+.status-new  { display: inline-block; padding: 1px 8px; border-radius: 99px; font-size: 11px; font-weight: 600; background: #f0fdf4; border: 1px solid #86efac; color: #16a34a; }
+.status-dupe { display: inline-block; padding: 1px 8px; border-radius: 99px; font-size: 11px; font-weight: 600; background: var(--surface); border: 1px solid var(--border); color: var(--muted); }
+.match-badge { display: inline-block; padding: 1px 7px; border-radius: 4px; font-size: 11px; font-weight: 600; }
+.match-broad  { background: #fef3c7; color: #92400e; }
+.match-phrase { background: #ede9fe; color: #5b21b6; }
+.match-exact  { background: #dcfce7; color: #166534; }
+.kw-type-pill { display: inline-block; padding: 1px 7px; border-radius: 99px; font-size: 10px; font-weight: 700; letter-spacing: 0.03em; text-transform: uppercase; margin-right: 4px; }
+.kw-type-branded    { background: #dbeafe; color: #1e40af; }
+.kw-type-competitor { background: #fce7f3; color: #9d174d; }
+.kw-type-generic    { background: #f3f4f6; color: #374151; }
 
-  /* Table */
-  .table-wrap { overflow-x: auto; border: 1px solid var(--border); border-radius: 6px; }
-  table { width: 100%; border-collapse: collapse; font-size: 13px; }
-  thead th {
-    background: var(--surface); padding: 9px 12px; text-align: left;
-    font-weight: 600; font-size: 12px; color: var(--muted);
-    border-bottom: 1px solid var(--border); white-space: nowrap; cursor: pointer;
-    user-select: none; position: sticky; top: 0;
-  }
-  thead th:hover { color: var(--accent); }
-  thead th .sort-arrow { font-size: 10px; margin-left: 3px; }
-  tbody tr { border-bottom: 1px solid var(--border); }
-  tbody tr:last-child { border-bottom: none; }
-  tbody tr.opp-row { background: var(--green-bg); }
-  tbody td { padding: 8px 12px; vertical-align: middle; }
-  tbody td.keyword-cell { max-width: 220px; word-break: break-word; }
-  tbody td.num-cell { text-align: right; font-variant-numeric: tabular-nums; }
+/* ── Rationale ── */
+.rationale-cell { font-size: 11px; color: var(--muted); line-height: 1.5; max-width: 240px; }
+.rationale-cell strong { color: var(--accent); font-weight: 600; }
 
-  /* Badges */
-  .pos-badge {
-    display: inline-block; padding: 1px 7px; border-radius: 99px;
-    font-size: 11px; font-weight: 700; color: #fff;
-  }
-  .pos-1 { background: var(--badge1); }
-  .pos-2 { background: var(--badge2); }
-  .pos-3 { background: var(--badge3); }
+/* ── Empty state ── */
+.empty-state { padding: 40px; text-align: center; color: var(--muted); font-size: 13px; }
+.empty-state-icon { font-size: 32px; margin-bottom: 8px; }
 
-  /* Show more */
-  #show-more-btn {
-    display: block; margin: 12px auto 0;
-    padding: 8px 24px; border: 1px solid var(--border);
-    border-radius: 5px; background: var(--surface);
-    font-size: 13px; cursor: pointer; color: var(--text);
-  }
-  #show-more-btn:hover { border-color: var(--accent); }
+/* ══════════════════════════════════════════════════════
+   PAGINATION
+══════════════════════════════════════════════════════ */
+.pagination {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 10px 4px; margin-top: 8px; flex-wrap: wrap; gap: 8px;
+}
+.pagination-info { font-size: 12px; color: var(--muted); }
+.pagination-controls { display: flex; gap: 4px; align-items: center; }
+.pg-btn {
+  min-width: 32px; height: 32px; padding: 0 8px; border: 1px solid var(--border);
+  background: var(--bg); border-radius: 5px; font-size: 13px; cursor: pointer;
+  color: var(--text); display: flex; align-items: center; justify-content: center;
+  font-weight: 500;
+}
+.pg-btn:hover:not(:disabled) { border-color: var(--accent); color: var(--accent); }
+.pg-btn:disabled { opacity: 0.35; cursor: not-allowed; }
+.pg-btn.active { background: var(--accent); border-color: var(--accent); color: #fff; font-weight: 700; }
+.pg-ellipsis { padding: 0 4px; color: var(--muted); font-size: 13px; }
+.page-size-select {
+  padding: 4px 8px; border: 1px solid var(--border); border-radius: 5px;
+  font-size: 12px; background: var(--bg); color: var(--text); cursor: pointer;
+}
 
-  .empty-state { padding: 40px; text-align: center; color: var(--muted); font-size: 14px; }
-
-  /* Footer */
-  footer { margin-top: 40px; padding-top: 16px; border-top: 1px solid var(--border); text-align: center; font-size: 12px; color: var(--muted); }
+footer { margin-top: 48px; padding-top: 16px; border-top: 1px solid var(--border); text-align: center; font-size: 12px; color: var(--muted); }
 </style>
 </head>
 <body>
 <div class="container">
 
-  <!-- HEADER -->
+  <!-- Header -->
   <div class="header">
     <h1>🌾 Keyword Harvest</h1>
     <p>Reverse-ASIN lookup powered by Amazon Brand Analytics "Top Search Terms" data.</p>
     <span class="privacy-note">🔒 All processing happens in your browser — no data leaves this page.</span>
   </div>
 
-  <!-- ERROR BANNER -->
   <div class="error-banner" id="error-banner"></div>
 
-  <!-- FILE DROP ZONE -->
+  <!-- Step 1: Brand Analytics CSV -->
   <span class="section-label">1. Upload Brand Analytics CSV</span>
   <div class="drop-zone" id="drop-zone">
     <input type="file" id="file-input" accept=".csv,.txt">
     <div class="drop-zone-icon">📂</div>
-    <div class="drop-zone-text">
-      Drag &amp; drop your Top Search Terms CSV here, or <strong id="browse-link">browse</strong>
-    </div>
+    <div class="drop-zone-text">Drag &amp; drop your Top Search Terms CSV here, or <strong id="browse-link">browse</strong></div>
   </div>
-
   <div class="file-info" id="file-info">
     <div class="file-name" id="file-name-display"></div>
     <div class="file-meta" id="file-meta-display"></div>
@@ -255,14 +311,12 @@
     <div class="parse-summary" id="parse-summary" style="display:none"></div>
   </div>
 
-  <!-- BULK SHEET UPLOAD -->
-  <span class="section-label">2. Upload Bulk Campaign Report <span style="font-weight:400;color:var(--muted)">(optional — enables "Already added" status + bulk download)</span></span>
+  <!-- Step 2: Bulk campaign report (optional) -->
+  <span class="section-label">2. Upload Bulk Campaign Report <span style="font-weight:400;color:var(--muted)">(optional — enables "Added" status, bid suggestions &amp; bulk download)</span></span>
   <div class="drop-zone" id="bulk-drop-zone">
     <input type="file" id="bulk-file-input" accept=".xlsx,.csv">
     <div class="drop-zone-icon">📊</div>
-    <div class="drop-zone-text">
-      Drag &amp; drop your Sponsored Products bulk sheet (.xlsx) here, or <strong id="bulk-browse-link">browse</strong>
-    </div>
+    <div class="drop-zone-text">Drag &amp; drop your Sponsored Products bulk sheet (.xlsx) here, or <strong id="bulk-browse-link">browse</strong></div>
   </div>
   <div class="bulk-info" id="bulk-info">
     <div class="bulk-name" id="bulk-name-display"></div>
@@ -270,14 +324,14 @@
     <div class="bulk-summary" id="bulk-summary-display"></div>
   </div>
 
-  <!-- ASIN INPUT -->
+  <!-- Step 3: ASINs -->
   <div class="asin-section">
     <span class="section-label">3. Enter target ASINs</span>
     <textarea id="asin-input" placeholder="B01234ABCD, B09876ZYXW&#10;One per line or comma-separated"></textarea>
     <div class="asin-tags" id="asin-tags"></div>
   </div>
 
-  <!-- CALIBRATION PANEL -->
+  <!-- Calibration -->
   <details class="calibration" id="calibration-panel">
     <summary>Volume estimation calibration</summary>
     <div class="calibration-body">
@@ -291,110 +345,171 @@
         <input type="number" id="cal-b" value="0.35" step="0.01" min="0.01" max="2">
         <small>Default: 0.35</small>
       </div>
-      <div class="cal-field" style="align-self:flex-end; padding-bottom:2px;">
+      <div class="cal-field" style="align-self:flex-end;padding-bottom:2px;">
         <small style="font-size:12px;">Est. = K × SFR<sup>−b</sup> ± 40%</small>
       </div>
     </div>
   </details>
 
-  <!-- RUN BUTTON -->
   <button id="run-btn" disabled>Run Reverse-ASIN Lookup</button>
 
-  <!-- RESULTS -->
+  <!-- ═══════════════════════════════════════════════════
+       RESULTS
+  ═══════════════════════════════════════════════════ -->
   <div id="results-section">
+
+    <!-- Summary strip -->
     <div class="summary-strip" id="summary-strip"></div>
 
-    <!-- OUTPUT 1: Keyword Suggestions -->
-    <div class="output-section">
-      <div class="output-heading">
-        Output 1 — Keyword suggestions
-        <span>All search terms where your ASIN appears in top 3 clicked results</span>
-        <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
-          <div class="filter-toggle" id="status-toggle">
-            <button class="active" data-val="all">All</button>
-            <button data-val="new">New only</button>
-            <button data-val="added">Already added</button>
-          </div>
-          <input type="text" id="filter-input" placeholder="Filter keywords…" style="padding:6px 10px;border:1px solid var(--border);border-radius:5px;font-size:13px;background:var(--bg);color:var(--text);min-width:160px;">
-          <button id="export-btn">⬇ Export CSV</button>
-        </div>
-      </div>
-      <div class="table-wrap">
-        <table><thead id="results-thead"></thead><tbody id="results-tbody"></tbody></table>
-      </div>
-      <button id="show-more-btn" style="display:none"></button>
+    <!-- Outer tabs: Branded / Generic / Competitor -->
+    <div class="outer-tabs-bar">
+      <button class="outer-tab-btn active" data-outer="generic">
+        Generic <span class="outer-tab-count" id="cnt-generic">0</span>
+      </button>
+      <button class="outer-tab-btn" data-outer="branded">
+        Branded <span class="outer-tab-count" id="cnt-branded">0</span>
+      </button>
+      <button class="outer-tab-btn" data-outer="competitor">
+        Competitor <span class="outer-tab-count" id="cnt-competitor">0</span>
+      </button>
     </div>
 
-    <!-- OUTPUT 2: Campaign Action Plan (only when bulk sheet loaded) -->
-    <div class="output-section" id="action-section" style="display:none">
-      <div class="output-heading">
-        Output 2 — Campaign action plan
-        <span>New keywords mapped to your campaigns, with bid and rationale</span>
-        <div style="display:flex;gap:8px;">
-          <input type="text" id="action-filter" placeholder="Filter…" style="padding:6px 10px;border:1px solid var(--border);border-radius:5px;font-size:13px;background:var(--bg);color:var(--text);min-width:140px;">
-          <button id="export-action-btn">⬇ Export CSV</button>
-          <button id="bulk-download-btn" class="btn-green" disabled>⬇ Download bulk upload sheet</button>
+    <!-- ── GENERIC panel ── -->
+    <div class="outer-tab-panel active" id="panel-generic">
+      <div class="inner-tabs-bar">
+        <button class="inner-tab-btn active" data-inner="generic-notadded">
+          Not Added <span class="inner-tab-count" id="cnt-generic-notadded">0</span>
+        </button>
+        <button class="inner-tab-btn" data-inner="generic-added">
+          Added <span class="inner-tab-count" id="cnt-generic-added">0</span>
+        </button>
+      </div>
+      <div class="inner-tab-panel active" id="panel-generic-notadded">
+        <div class="table-toolbar">
+          <input class="toolbar-search" type="text" placeholder="Filter keywords, ASINs, campaigns…" data-search="generic-notadded">
+          <button class="btn-outline" data-export="generic-notadded">⬇ Export CSV</button>
+          <button class="btn-green-sm" id="bulk-dl-generic-notadded" disabled>⬇ Bulk upload sheet</button>
         </div>
+        <div class="table-wrap">
+          <table><thead id="th-generic-notadded"></thead><tbody id="tb-generic-notadded"></tbody></table>
+        </div>
+        <div class="pagination" id="pg-generic-notadded"></div>
       </div>
-      <div class="table-wrap">
-        <table><thead id="action-thead"></thead><tbody id="action-tbody"></tbody></table>
+      <div class="inner-tab-panel" id="panel-generic-added">
+        <div class="table-toolbar">
+          <input class="toolbar-search" type="text" placeholder="Filter keywords, ASINs, campaigns…" data-search="generic-added">
+          <button class="btn-outline" data-export="generic-added">⬇ Export CSV</button>
+        </div>
+        <div class="table-wrap">
+          <table><thead id="th-generic-added"></thead><tbody id="tb-generic-added"></tbody></table>
+        </div>
+        <div class="pagination" id="pg-generic-added"></div>
       </div>
-      <button id="show-more-action-btn" style="display:none"></button>
     </div>
-  </div>
+
+    <!-- ── BRANDED panel ── -->
+    <div class="outer-tab-panel" id="panel-branded">
+      <div class="inner-tabs-bar">
+        <button class="inner-tab-btn active" data-inner="branded-notadded">
+          Not Added <span class="inner-tab-count" id="cnt-branded-notadded">0</span>
+        </button>
+        <button class="inner-tab-btn" data-inner="branded-added">
+          Added <span class="inner-tab-count" id="cnt-branded-added">0</span>
+        </button>
+      </div>
+      <div class="inner-tab-panel active" id="panel-branded-notadded">
+        <div class="table-toolbar">
+          <input class="toolbar-search" type="text" placeholder="Filter keywords, ASINs, campaigns…" data-search="branded-notadded">
+          <button class="btn-outline" data-export="branded-notadded">⬇ Export CSV</button>
+          <button class="btn-green-sm" id="bulk-dl-branded-notadded" disabled>⬇ Bulk upload sheet</button>
+        </div>
+        <div class="table-wrap">
+          <table><thead id="th-branded-notadded"></thead><tbody id="tb-branded-notadded"></tbody></table>
+        </div>
+        <div class="pagination" id="pg-branded-notadded"></div>
+      </div>
+      <div class="inner-tab-panel" id="panel-branded-added">
+        <div class="table-toolbar">
+          <input class="toolbar-search" type="text" placeholder="Filter keywords, ASINs, campaigns…" data-search="branded-added">
+          <button class="btn-outline" data-export="branded-added">⬇ Export CSV</button>
+        </div>
+        <div class="table-wrap">
+          <table><thead id="th-branded-added"></thead><tbody id="tb-branded-added"></tbody></table>
+        </div>
+        <div class="pagination" id="pg-branded-added"></div>
+      </div>
+    </div>
+
+    <!-- ── COMPETITOR panel ── -->
+    <div class="outer-tab-panel" id="panel-competitor">
+      <div class="inner-tabs-bar">
+        <button class="inner-tab-btn active" data-inner="competitor-notadded">
+          Not Added <span class="inner-tab-count" id="cnt-competitor-notadded">0</span>
+        </button>
+        <button class="inner-tab-btn" data-inner="competitor-added">
+          Added <span class="inner-tab-count" id="cnt-competitor-added">0</span>
+        </button>
+      </div>
+      <div class="inner-tab-panel active" id="panel-competitor-notadded">
+        <div class="table-toolbar">
+          <input class="toolbar-search" type="text" placeholder="Filter keywords, ASINs, campaigns…" data-search="competitor-notadded">
+          <button class="btn-outline" data-export="competitor-notadded">⬇ Export CSV</button>
+          <button class="btn-green-sm" id="bulk-dl-competitor-notadded" disabled>⬇ Bulk upload sheet</button>
+        </div>
+        <div class="table-wrap">
+          <table><thead id="th-competitor-notadded"></thead><tbody id="tb-competitor-notadded"></tbody></table>
+        </div>
+        <div class="pagination" id="pg-competitor-notadded"></div>
+      </div>
+      <div class="inner-tab-panel" id="panel-competitor-added">
+        <div class="table-toolbar">
+          <input class="toolbar-search" type="text" placeholder="Filter keywords, ASINs, campaigns…" data-search="competitor-added">
+          <button class="btn-outline" data-export="competitor-added">⬇ Export CSV</button>
+        </div>
+        <div class="table-wrap">
+          <table><thead id="th-competitor-added"></thead><tbody id="tb-competitor-added"></tbody></table>
+        </div>
+        <div class="pagination" id="pg-competitor-added"></div>
+      </div>
+    </div>
+
+  </div><!-- /results-section -->
 
 </div><!-- /container -->
 
 <footer>
-  <p>Keyword Harvest · v1.0 · All data stays in your browser · Made with IBM Bob</p>
+  <p>Keyword Harvest · v2.0 · All data stays in your browser · Made with IBM Bob</p>
 </footer>
 
 <script>
 // =============================================================================
 // CONSTANTS
 // =============================================================================
-const K_DEFAULT = 8_000_000;
-const B_DEFAULT = 0.35;
-const PAGE_SIZE  = 500;
+const K_DEFAULT  = 8_000_000;
+const B_DEFAULT  = 0.35;
+const PAGE_SIZE  = 25;
 
 // =============================================================================
-// WORKER SOURCE (inline via Blob URL)
+// WORKER SOURCE (inline Blob URL — streams multi-GB CSV without blocking UI)
 // =============================================================================
 const WORKER_SRC = `
 'use strict';
-
-// ---- CSV chunk reader -------------------------------------------------------
-// Streams the file in 4MB slices, accumulates a line buffer, emits parsed rows.
-
-// ── Tuning constants ─────────────────────────────────────────────────────────
-// 16 MB chunks: fewer loop iterations over a 2 GB file (125 vs 512 for 4 MB).
-// Large enough that decode overhead is negligible; small enough to stay
-// well below the 2 GB ArrayBuffer limit and avoid single-chunk GC pauses.
-const CHUNK_SIZE     = 16 * 1024 * 1024; // 16 MB
-// First-pass header scan reads only this much — column map is built cheaply
-// before we start streaming the bulk of the file.
-const HEADER_SCAN_SZ = 64 * 1024;        // 64 KB
+const CHUNK_SIZE     = 16 * 1024 * 1024;
+const HEADER_SCAN_SZ = 64 * 1024;
 
 self.onmessage = async function(e) {
   const { file, targetAsins: targetAsinsArr, K, b } = e.data;
   const targetAsins = new Set((targetAsinsArr || []).map(a => a.toUpperCase()));
   const isPreflight = targetAsins.has('__PREFLIGHT__');
+  const totalSize   = file.size;
+  const decoder     = new TextDecoder('utf-8');
 
-  const totalSize = file.size;
-  const decoder   = new TextDecoder('utf-8');
-
-  // ── Phase 1: scan first 64 KB to detect header + date range ─────────────
-  // Avoids reading 2 GB just to find column positions.
-  let colMap       = null;
-  let detectedRange = null;
+  // Phase 1 — scan first 64 KB for header + date range
+  let colMap = null, detectedRange = null;
   {
-    const scanSize = Math.min(HEADER_SCAN_SZ, totalSize);
-    const scanBuf  = await file.slice(0, scanSize).arrayBuffer();
+    const scanBuf  = await file.slice(0, Math.min(HEADER_SCAN_SZ, totalSize)).arrayBuffer();
     const scanText = decoder.decode(scanBuf);
-    // Reset decoder state — we'll re-decode from byte 0 in Phase 2.
-    // (TextDecoder is stateful for multi-byte chars; we create a fresh one below.)
-    const scanLines = scanText.split('\\n');
-    for (const rawLine of scanLines) {
+    for (const rawLine of scanText.split('\\n')) {
       const line = rawLine.replace(/\\r$/, '').trim();
       if (!line) continue;
       const lc = line.toLowerCase();
@@ -405,10 +520,7 @@ self.onmessage = async function(e) {
       if (lc.includes('search frequency')) {
         const headers = parseCSVLine(line);
         colMap = buildColMap(headers);
-        if (colMap.error) {
-          self.postMessage({ type: 'error', message: colMap.error });
-          return;
-        }
+        if (colMap.error) { self.postMessage({ type: 'error', message: colMap.error }); return; }
         break;
       }
     }
@@ -418,340 +530,206 @@ self.onmessage = async function(e) {
     }
   }
 
-  // For preflight we only need structure validation — skip the 2 GB data scan.
-  // We send back a dummy totalRows; the UI will show "File validated" not a row count.
   if (isPreflight) {
     self.postMessage({ type: 'done', results: [], totalRows: 0, detectedRange, preflightOnly: true });
     return;
   }
 
-  // ── Phase 2: stream full file, match ASINs, emit results inline ──────────
-  // Fresh decoder for the actual streaming pass.
+  // Phase 2 — stream full file
   const streamDecoder = new TextDecoder('utf-8');
-  let   tail          = '';        // incomplete line carried between chunks
-  let   headerSkipped = false;     // true once we've consumed the header row
-  const rows          = [];
-  let   totalRowsParsed = 0;
-  let   lastProgressAt  = Date.now();
-  let   offset          = 0;
+  let tail = '', headerSkipped = false;
+  const rows = [];
+  let totalRowsParsed = 0, lastProgressAt = Date.now(), offset = 0;
 
   while (offset < totalSize) {
-    const slice   = file.slice(offset, offset + CHUNK_SIZE);
-    const buf     = await slice.arrayBuffer();
-    // stream:true keeps multi-byte char state across chunks
-    const text    = streamDecoder.decode(buf, { stream: offset + CHUNK_SIZE < totalSize });
-    offset       += CHUNK_SIZE;
-
-    // Append to tail and find last newline so we never split mid-line
+    const buf  = await file.slice(offset, offset + CHUNK_SIZE).arrayBuffer();
+    const text = streamDecoder.decode(buf, { stream: offset + CHUNK_SIZE < totalSize });
+    offset    += CHUNK_SIZE;
     const combined = tail + text;
     const lastNL   = combined.lastIndexOf('\\n');
-
-    // If no newline yet and more data coming, buffer it
     if (lastNL === -1 && offset < totalSize) { tail = combined; continue; }
-
     const block = lastNL === -1 ? combined : combined.slice(0, lastNL);
     tail        = lastNL === -1 ? ''       : combined.slice(lastNL + 1);
 
-    // Process every line in this block without a full .split() allocation:
-    // walk character-by-character tracking line start positions.
     let lineStart = 0;
     for (let i = 0; i <= block.length; i++) {
       if (i === block.length || block[i] === '\\n') {
-        // Extract one line
-        const end  = (i > 0 && block[i - 1] === '\\r') ? i - 1 : i;
+        const end  = (i > 0 && block[i-1] === '\\r') ? i - 1 : i;
         const line = block.slice(lineStart, end);
         lineStart  = i + 1;
-
         if (!line) continue;
-
-        // Skip header row (we already parsed it in Phase 1)
         if (!headerSkipped) {
           if (line.toLowerCase().includes('search frequency')) headerSkipped = true;
           continue;
         }
-
-        // ── hot path: parse only what we need ──────────────────────────────
         const cells = parseCSVLine(line);
         if (cells.length < 4) continue;
-
-        const termRaw = cells[colMap.term] || '';
-        const sfrRaw  = cells[colMap.sfr]  || '';
-        const term    = termRaw.trim();
-        const sfr     = parseInt(sfrRaw.replace(/,/g, ''), 10);
+        const term = (cells[colMap.term] || '').trim();
+        const sfr  = parseInt((cells[colMap.sfr] || '').replace(/,/g, ''), 10);
         if (!term || isNaN(sfr) || sfr <= 0) continue;
-
         totalRowsParsed++;
-
-        // Quick early-exit: check any target ASIN appears before doing full work
         let anyMatch = false;
         for (const pos of colMap.positions) {
-          if (targetAsins.has((cells[pos.asinIdx] || '').trim().toUpperCase())) {
-            anyMatch = true; break;
-          }
+          if (targetAsins.has((cells[pos.asinIdx] || '').trim().toUpperCase())) { anyMatch = true; break; }
         }
         if (!anyMatch) continue;
-
-        // Compute volume estimate inline — no second pass needed
-        const est   = K * Math.pow(sfr, -b);
-        const estLo = Math.round(est * 0.6);
-        const estHi = Math.round(est * 1.4);
-
+        const est = K * Math.pow(sfr, -b);
         for (const pos of colMap.positions) {
           const asinVal = (cells[pos.asinIdx] || '').trim().toUpperCase();
           if (!asinVal || !targetAsins.has(asinVal)) continue;
           rows.push({
-            asin: asinVal,
-            searchTerm: term,
-            sfr,
-            clickPosition: pos.num,
-            clickShare:       parsePercent(cells[pos.csIdx]  || '0'),
-            conversionShare:  parsePercent(cells[pos.cvsIdx] || '0'),
-            estVolumeLow:  estLo,
-            estVolumeHigh: estHi,
+            asin: asinVal, searchTerm: term, sfr, clickPosition: pos.num,
+            clickShare:      parsePercent(cells[pos.csIdx]  || '0'),
+            conversionShare: parsePercent(cells[pos.cvsIdx] || '0'),
+            estVolumeLow:  Math.round(est * 0.6),
+            estVolumeHigh: Math.round(est * 1.4),
           });
         }
       }
     }
-
-    // ── progress — throttled to avoid postMessage flood ───────────────────
     const now = Date.now();
     if (now - lastProgressAt >= 250 || offset >= totalSize) {
-      self.postMessage({
-        type: 'progress',
-        pct:  Math.min(99, Math.round(offset / totalSize * 100)),
-        rows: totalRowsParsed,
-      });
+      self.postMessage({ type: 'progress', pct: Math.min(99, Math.round(offset / totalSize * 100)), rows: totalRowsParsed });
       lastProgressAt = now;
     }
   }
 
-  // Flush final partial line if any
+  // Flush tail
   if (tail.trim() && headerSkipped) {
     const line  = tail.replace(/\\r$/, '').trim();
     const cells = parseCSVLine(line);
     if (cells.length >= 4) {
       const term = (cells[colMap.term] || '').trim();
-      const sfr  = parseInt((cells[colMap.sfr] || '').replace(/,/g, ''), 10);
+      const sfr  = parseInt((cells[colMap.sfr] || '').replace(/,/g,''), 10);
       if (term && !isNaN(sfr) && sfr > 0) {
         totalRowsParsed++;
-        const est   = K * Math.pow(sfr, -b);
-        const estLo = Math.round(est * 0.6);
-        const estHi = Math.round(est * 1.4);
+        const est = K * Math.pow(sfr, -b);
         for (const pos of colMap.positions) {
           const asinVal = (cells[pos.asinIdx] || '').trim().toUpperCase();
           if (!asinVal || !targetAsins.has(asinVal)) continue;
           rows.push({
-            asin: asinVal, searchTerm: term, sfr,
-            clickPosition: pos.num,
+            asin: asinVal, searchTerm: term, sfr, clickPosition: pos.num,
             clickShare:      parsePercent(cells[pos.csIdx]  || '0'),
             conversionShare: parsePercent(cells[pos.cvsIdx] || '0'),
-            estVolumeLow: estLo, estVolumeHigh: estHi,
+            estVolumeLow: Math.round(est * 0.6), estVolumeHigh: Math.round(est * 1.4),
           });
         }
       }
     }
   }
-
   self.postMessage({ type: 'done', results: rows, totalRows: totalRowsParsed, detectedRange });
 };
 
-// ── CSV line parser (handles quoted fields) ──────────────────────────────────
 function parseCSVLine(line) {
-  const cols = [];
-  let cur = '';
-  let inQ = false;
+  const cols = []; let cur = '', inQ = false;
   for (let i = 0; i < line.length; i++) {
     const c = line[i];
-    if (c === '"') {
-      if (inQ && line[i+1] === '"') { cur += '"'; i++; }
-      else inQ = !inQ;
-    } else if (c === ',' && !inQ) {
-      cols.push(cur); cur = '';
-    } else {
-      cur += c;
-    }
+    if (c === '"') { if (inQ && line[i+1]==='"'){cur+='"';i++;}else inQ=!inQ; }
+    else if (c === ',' && !inQ) { cols.push(cur); cur = ''; }
+    else cur += c;
   }
-  cols.push(cur);
-  return cols;
+  cols.push(cur); return cols;
 }
 
-// ── Column map builder ───────────────────────────────────────────────────────
-// Uses a normalised column key (strip #/spaces/punctuation) for robust matching.
 function normaliseCol(h) {
-  return (h || '').toLowerCase().replace(/[^a-z0-9]/g, ' ').replace(/\\s+/g, ' ').trim();
+  return (h || '').toLowerCase().replace(/[^a-z0-9]/g,' ').replace(/\\s+/g,' ').trim();
 }
 
 function buildColMap(headers) {
-  const norm = headers.map(normaliseCol);
-
-  // Search term — must contain "search term" (not "search frequency")
+  const norm    = headers.map(normaliseCol);
   const termIdx = norm.findIndex(h => h.includes('search term') && !h.includes('frequency'));
-
-  // SFR — contains "search frequency"
-  const sfrIdx = norm.findIndex(h => h.includes('search frequency'));
-
+  const sfrIdx  = norm.findIndex(h => h.includes('search frequency'));
   const missing = [];
-  if (termIdx === -1)  missing.push('"Search Term"');
-  if (sfrIdx  === -1)  missing.push('"Search Frequency Rank"');
-
-  // For each position 1/2/3 find: clicked asin, click share (not conversion), conversion share.
-  // normaliseCol already collapses all non-alphanumeric chars to single spaces,
-  // so we can use word-split matching without any regex escaping.
+  if (termIdx === -1) missing.push('"Search Term"');
+  if (sfrIdx  === -1) missing.push('"Search Frequency Rank"');
+  const posTokens = { 1:['1','one','1st','first'], 2:['2','two','2nd','second'], 3:['3','three','3rd','third'] };
   const positions = [];
-  const posTokens = {
-    1: ['1', 'one', '1st', 'first'],
-    2: ['2', 'two', '2nd', 'second'],
-    3: ['3', 'three', '3rd', 'third']
-  };
-
-  function hasPosTok(h, tokens) {
-    const words = h.split(' ');
-    return tokens.some(t => words.includes(t));
-  }
-
-  for (const num of [1, 2, 3]) {
+  function hasPosTok(h, tokens) { const words = h.split(' '); return tokens.some(t => words.includes(t)); }
+  for (const num of [1,2,3]) {
     const tokens = posTokens[num];
-
-    // ASIN: normalised col contains "asin" + position token as a whole word
-    const asinIdx = norm.findIndex(h =>
-      h.includes('asin') && hasPosTok(h, tokens)
-    );
-
-    // Click share: contains "click share" but NOT "conversion" + position token
-    const csIdx = norm.findIndex(h =>
-      !h.includes('conversion') &&
-      h.includes('click') && (h.includes('share') || h.includes('%')) &&
-      hasPosTok(h, tokens)
-    );
-
-    // Conversion share: contains "conversion" + position token
-    const cvsIdx = norm.findIndex(h =>
-      h.includes('conversion') && hasPosTok(h, tokens)
-    );
-
-    if (asinIdx === -1) { missing.push('"#' + num + ' Clicked ASIN"'); continue; }
-    if (csIdx  === -1)  { missing.push('"#' + num + ' Click Share"');   continue; }
-    if (cvsIdx === -1)  { missing.push('"#' + num + ' Conversion Share"'); continue; }
-
+    const asinIdx = norm.findIndex(h => h.includes('asin') && hasPosTok(h, tokens));
+    const csIdx   = norm.findIndex(h => !h.includes('conversion') && h.includes('click') && (h.includes('share')||h.includes('%')) && hasPosTok(h, tokens));
+    const cvsIdx  = norm.findIndex(h => h.includes('conversion') && hasPosTok(h, tokens));
+    if (asinIdx===-1){missing.push('"#'+num+' Clicked ASIN"');continue;}
+    if (csIdx  ===-1){missing.push('"#'+num+' Click Share"');continue;}
+    if (cvsIdx ===-1){missing.push('"#'+num+' Conversion Share"');continue;}
     positions.push({ num, asinIdx, csIdx, cvsIdx });
   }
-
   if (missing.length) {
-    const found = headers.filter(Boolean).slice(0, 20).join(', ');
+    const found = headers.filter(Boolean).slice(0,20).join(', ');
     return { error: 'Missing required columns: ' + missing.join(', ') + '.\\n\\nFirst 20 columns found in file: ' + found };
   }
-
   return { term: termIdx, sfr: sfrIdx, positions };
 }
 
-// ── Parse "12.34%" or "0.1234" → numeric percent ────────────────────────────
 function parsePercent(val) {
-  val = (val || '').trim();
-  if (val.endsWith('%')) return parseFloat(val) || 0;
+  val = (val||'').trim();
+  if (val.endsWith('%')) return parseFloat(val)||0;
   const n = parseFloat(val);
   if (isNaN(n)) return 0;
-  // If < 1 and not explicitly "%" it's likely a decimal fraction
   return n < 1 ? n * 100 : n;
 }
 `;
 
 // =============================================================================
-// MAIN THREAD GLOBALS
+// GLOBALS
 // =============================================================================
-let parsedResults    = [];
-let filteredResults  = [];
-let currentPage      = 0;
-let sortCol          = 'sfr';
-let sortDir          = 'asc';
-let multipleAsins    = false;
-let workerBlobUrl    = null;
-let statusFilter     = 'all';  // 'all' | 'new' | 'added'
+let parsedResults  = [];   // raw results from worker
+let annotatedResults = []; // after annotateBulk — has .kwType, .status, .adGroups, .campaignMetrics
+let workerBlobUrl  = null;
+let fileReady      = false;
+let loadedFile     = null;
+let detectedRange  = null;
+let bulkData       = null;
 
-// Output 2: action plan rows (built from parsedResults after annotateBulk)
-let actionRows       = [];        // flat: one per (result × adGroup × matchType)
-let filteredActions  = [];
-let actionPage       = 0;
+// Per-view state: { filtered[], page, sortCol, sortDir, query }
+const VIEW_KEYS = ['generic-notadded','generic-added','branded-notadded','branded-added','competitor-notadded','competitor-added'];
+const viewState = {};
+for (const k of VIEW_KEYS) {
+  viewState[k] = { filtered: [], page: 0, sortCol: 'sfr', sortDir: 'asc', query: '' };
+}
 
 // =============================================================================
 // DOM REFS
 // =============================================================================
-const dropZone         = document.getElementById('drop-zone');
-const fileInput        = document.getElementById('file-input');
-const browseLink       = document.getElementById('browse-link');
-const fileInfoEl       = document.getElementById('file-info');
-const fileNameEl       = document.getElementById('file-name-display');
-const fileMetaEl       = document.getElementById('file-meta-display');
-const progressWrap     = document.getElementById('progress-wrap');
-const progressFill     = document.getElementById('progress-fill');
-const progressText     = document.getElementById('progress-text');
-const parseSummary     = document.getElementById('parse-summary');
-const bulkDropZone     = document.getElementById('bulk-drop-zone');
-const bulkFileInput    = document.getElementById('bulk-file-input');
-const bulkBrowseLink   = document.getElementById('bulk-browse-link');
-const bulkInfoEl       = document.getElementById('bulk-info');
-const bulkNameEl       = document.getElementById('bulk-name-display');
-const bulkMetaEl       = document.getElementById('bulk-meta-display');
-const bulkSummaryEl    = document.getElementById('bulk-summary-display');
-const asinInput        = document.getElementById('asin-input');
-const asinTagsEl       = document.getElementById('asin-tags');
-const runBtn           = document.getElementById('run-btn');
-const errorBanner      = document.getElementById('error-banner');
-const resultsSection   = document.getElementById('results-section');
-const summaryStrip     = document.getElementById('summary-strip');
-const filterInput      = document.getElementById('filter-input');
-const statusToggle     = document.getElementById('status-toggle');
-const exportBtn        = document.getElementById('export-btn');
-const resultsTbody     = document.getElementById('results-tbody');
-const resultsThead     = document.getElementById('results-thead');
-const showMoreBtn      = document.getElementById('show-more-btn');
-const actionSection    = document.getElementById('action-section');
-const actionThead      = document.getElementById('action-thead');
-const actionTbody      = document.getElementById('action-tbody');
-const actionFilter     = document.getElementById('action-filter');
-const exportActionBtn  = document.getElementById('export-action-btn');
-const bulkDownloadBtn  = document.getElementById('bulk-download-btn');
-const showMoreActionBtn= document.getElementById('show-more-action-btn');
+const dropZone        = document.getElementById('drop-zone');
+const fileInput       = document.getElementById('file-input');
+const browseLink      = document.getElementById('browse-link');
+const fileInfoEl      = document.getElementById('file-info');
+const fileNameEl      = document.getElementById('file-name-display');
+const fileMetaEl      = document.getElementById('file-meta-display');
+const progressWrap    = document.getElementById('progress-wrap');
+const progressFill    = document.getElementById('progress-fill');
+const progressText    = document.getElementById('progress-text');
+const parseSummary    = document.getElementById('parse-summary');
+const bulkDropZone    = document.getElementById('bulk-drop-zone');
+const bulkFileInput   = document.getElementById('bulk-file-input');
+const bulkBrowseLink  = document.getElementById('bulk-browse-link');
+const bulkInfoEl      = document.getElementById('bulk-info');
+const bulkNameEl      = document.getElementById('bulk-name-display');
+const bulkMetaEl      = document.getElementById('bulk-meta-display');
+const bulkSummaryEl   = document.getElementById('bulk-summary-display');
+const asinInput       = document.getElementById('asin-input');
+const asinTagsEl      = document.getElementById('asin-tags');
+const runBtn          = document.getElementById('run-btn');
+const errorBanner     = document.getElementById('error-banner');
+const resultsSection  = document.getElementById('results-section');
+const summaryStrip    = document.getElementById('summary-strip');
 
 // =============================================================================
-// STATE
+// XLSX PARSER (pure JS — no deps)
 // =============================================================================
-let fileReady       = false;
-let loadedFile      = null;
-let detectedRange   = null;
-
-// Bulk sheet state — populated by parseBulkSheet()
-// bulkData.adGroups: Map<adGroupKey, { campaign, adGroup, defaultBid, matchTypes: Set }>
-// bulkData.existingKeys: Set<"ASIN|||keyword|||matchtype"> — for dupe detection
-// bulkData.asinToAdGroups: Map<ASIN, adGroupKey[]>
-let bulkData = null;  // null = no bulk sheet loaded
-
-// =============================================================================
-// =============================================================================
-// XLSX PARSER — pure JS, no dependencies
-// Reads just the two sheets we need from the ZIP structure.
-// Amazon bulk sheets are Office Open XML (.xlsx = ZIP of XML files).
-// =============================================================================
-// =============================================================================
-
-// ── Minimal ZIP reader ───────────────────────────────────────────────────────
-// Locates files inside a ZIP by scanning the Central Directory at the end.
 function readZipEntries(buf) {
-  const u8    = new Uint8Array(buf);
-  const view  = new DataView(buf);
-  const len   = u8.length;
-
-  // Find End of Central Directory record (signature 0x06054b50) scanning from end
+  const u8 = new Uint8Array(buf), view = new DataView(buf), len = u8.length;
   let eocdOff = -1;
   for (let i = len - 22; i >= 0; i--) {
     if (view.getUint32(i, true) === 0x06054b50) { eocdOff = i; break; }
   }
   if (eocdOff === -1) throw new Error('Not a valid ZIP file.');
-
   const cdOffset = view.getUint32(eocdOff + 16, true);
   const cdCount  = view.getUint16(eocdOff + 8,  true);
-
-  const entries = new Map(); // filename → { offset, compSize, uncompSize, method }
-  let   pos     = cdOffset;
+  const entries  = new Map();
+  let pos = cdOffset;
   for (let i = 0; i < cdCount; i++) {
     if (view.getUint32(pos, true) !== 0x02014b50) break;
     const method    = view.getUint16(pos + 10, true);
@@ -768,87 +746,48 @@ function readZipEntries(buf) {
   return entries;
 }
 
-// ── Inflate (decompress) a DEFLATE-compressed ZIP entry ─────────────────────
-// Uses DecompressionStream which is available in all modern browsers.
 async function inflateEntry(buf, entry) {
-  const view     = new DataView(buf);
-  const localOff = entry.localOff;
-  // Skip local file header to get to the compressed data
-  const fnLen    = view.getUint16(localOff + 26, true);
-  const exLen    = view.getUint16(localOff + 28, true);
-  const dataOff  = localOff + 30 + fnLen + exLen;
+  const view  = new DataView(buf);
+  const fnLen = view.getUint16(entry.localOff + 26, true);
+  const exLen = view.getUint16(entry.localOff + 28, true);
+  const dataOff    = entry.localOff + 30 + fnLen + exLen;
   const compressed = buf.slice(dataOff, dataOff + entry.compSize);
-
-  if (entry.method === 0) {
-    // Stored (no compression)
-    return compressed;
-  }
-  // DEFLATE (method 8) — wrap in raw deflate stream
-  const ds = new DecompressionStream('deflate-raw');
+  if (entry.method === 0) return compressed;
+  const ds     = new DecompressionStream('deflate-raw');
   const writer = ds.writable.getWriter();
-  writer.write(new Uint8Array(compressed));
-  writer.close();
-  const chunks = [];
-  const reader = ds.readable.getReader();
-  while (true) {
-    const { done, value } = await reader.read();
-    if (done) break;
-    chunks.push(value);
-  }
-  const total = chunks.reduce((s, c) => s + c.length, 0);
-  const out   = new Uint8Array(total);
-  let off2 = 0;
-  for (const c of chunks) { out.set(c, off2); off2 += c.length; }
+  writer.write(new Uint8Array(compressed)); writer.close();
+  const chunks = [], reader = ds.readable.getReader();
+  while (true) { const { done, value } = await reader.read(); if (done) break; chunks.push(value); }
+  const total = chunks.reduce((s,c) => s + c.length, 0);
+  const out   = new Uint8Array(total); let off = 0;
+  for (const c of chunks) { out.set(c, off); off += c.length; }
   return out.buffer;
 }
 
-// ── Extract a named ZIP entry as a UTF-8 string ─────────────────────────────
 async function extractZipEntry(buf, entries, name) {
   const entry = entries.get(name);
   if (!entry) return null;
-  const inflated = await inflateEntry(buf, entry);
-  return new TextDecoder('utf-8').decode(inflated);
+  return new TextDecoder('utf-8').decode(await inflateEntry(buf, entry));
 }
 
-// ── Parse an XLSX sheet XML into a 2D array of string values ────────────────
-// Handles shared strings table (sst) and inline strings.
-// Amazon bulk sheets use t="inlineStr" exclusively with <is><t>value</t></is>.
-function parseSheetXml(xml, sstStrings) {
-  const rows   = [];
-  const rowRe  = /<row\b[^>]*>([\s\S]*?)<\/row>/g;
-  const cellRe = /<c\b([^>]*)>([\s\S]*?)<\/c>/g;
-  const vRe    = /<v>([\s\S]*?)<\/v>/;
-  const tTagRe = /<t[^>]*>([\s\S]*?)<\/t>/g;  // matches ALL <t> tags (rich text)
-  const rAttr  = /\br="([A-Z]+)/;
-  const tAttr  = /\bt="([^"]+)"/;
-
+function parseSheetXml(xml, sst) {
+  const rows = [], rowRe = /<row\b[^>]*>([\s\S]*?)<\/row>/g, cellRe = /<c\b([^>]*)>([\s\S]*?)<\/c>/g;
+  const vRe = /<v>([\s\S]*?)<\/v>/, tTagRe = /<t[^>]*>([\s\S]*?)<\/t>/g;
+  const rAttr = /\br="([A-Z]+)/, tAttr = /\bt="([^"]+)"/;
   let rowMatch;
   while ((rowMatch = rowRe.exec(xml)) !== null) {
-    const rowXml = rowMatch[1];
-    const rowArr = [];
-    let   cellMatch;
-    cellRe.lastIndex = 0;
+    const rowXml = rowMatch[1], rowArr = [];
+    let cellMatch; cellRe.lastIndex = 0;
     while ((cellMatch = cellRe.exec(rowXml)) !== null) {
-      const attrs    = cellMatch[1];
-      const inner    = cellMatch[2];
-      const rM       = rAttr.exec(attrs);
-      const colIdx   = rM ? colLetterToIndex(rM[1]) : rowArr.length;
-      const tM       = tAttr.exec(attrs);
-      const cellType = tM ? tM[1] : 'n';
-      let   val      = '';
-      if (cellType === 's') {
-        const vM = vRe.exec(inner);
-        if (vM) val = sstStrings[parseInt(vM[1])] || '';
-      } else if (cellType === 'inlineStr') {
-        // Concatenate ALL <t> segments (handles rich text runs)
-        const parts = []; let m;
-        tTagRe.lastIndex = 0;
-        while ((m = tTagRe.exec(inner)) !== null) parts.push(m[1]);
-        val = parts.join('');
-      } else {
-        const vM = vRe.exec(inner);
-        if (vM) val = vM[1];
-      }
+      const attrs = cellMatch[1], inner = cellMatch[2];
+      const rM    = rAttr.exec(attrs);
+      const colIdx= rM ? colLetterToIndex(rM[1]) : rowArr.length;
+      const tM    = tAttr.exec(attrs);
+      const ct    = tM ? tM[1] : 'n';
+      let val = '';
+      if (ct === 's') { const vM = vRe.exec(inner); if (vM) val = sst[parseInt(vM[1])] || ''; }
+      else if (ct === 'inlineStr') { const parts=[]; let m; tTagRe.lastIndex=0; while((m=tTagRe.exec(inner))!==null) parts.push(m[1]); val=parts.join(''); }
+      else { const vM = vRe.exec(inner); if (vM) val = vM[1]; }
       while (rowArr.length <= colIdx) rowArr.push('');
       rowArr[colIdx] = xmlDecode(val);
     }
@@ -857,450 +796,877 @@ function parseSheetXml(xml, sstStrings) {
   return rows;
 }
 
-function colLetterToIndex(letters) {
-  let idx = 0;
-  for (let i = 0; i < letters.length; i++) {
-    idx = idx * 26 + (letters.charCodeAt(i) - 64);
-  }
-  return idx - 1;
-}
-
-function xmlDecode(s) {
-  return s.replace(/&amp;/g,'&').replace(/&lt;/g,'<').replace(/&gt;/g,'>').replace(/&quot;/g,'"').replace(/&#(\d+);/g,(_,n)=>String.fromCharCode(+n));
-}
-
-// ── Parse shared strings table ───────────────────────────────────────────────
+function colLetterToIndex(l) { let i=0; for(let x=0;x<l.length;x++) i=i*26+(l.charCodeAt(x)-64); return i-1; }
+function xmlDecode(s) { return s.replace(/&amp;/g,'&').replace(/&lt;/g,'<').replace(/&gt;/g,'>').replace(/&quot;/g,'"').replace(/&#(\d+);/g,(_,n)=>String.fromCharCode(+n)); }
 function parseSst(xml) {
-  const strings = [];
-  const siRe = /<si>([\s\S]*?)<\/si>/g;
-  const tRe  = /<t[^>]*>([\s\S]*?)<\/t>/g;
-  let m;
-  while ((m = siRe.exec(xml)) !== null) {
-    const parts = [];
-    let t;
-    tRe.lastIndex = 0;
-    while ((t = tRe.exec(m[1])) !== null) parts.push(xmlDecode(t[1]));
-    strings.push(parts.join(''));
-  }
+  const strings=[],siRe=/<si>([\s\S]*?)<\/si>/g,tRe=/<t[^>]*>([\s\S]*?)<\/t>/g;
+  let m; while((m=siRe.exec(xml))!==null){const parts=[];let t;tRe.lastIndex=0;while((t=tRe.exec(m[1]))!==null)parts.push(xmlDecode(t[1]));strings.push(parts.join(''));}
   return strings;
 }
-
-// ── Get workbook sheet names → rId → sheet filename mapping ─────────────────
 function parseWorkbookXml(xml) {
-  const sheets = [];
-  const re = /<sheet\b[^>]*name="([^"]*)"[^>]*r:id="([^"]*)"[^>]*/g;
-  let m;
-  while ((m = re.exec(xml)) !== null) sheets.push({ name: m[1], rId: m[2] });
-  return sheets;
+  const sheets=[],re=/<sheet\b[^>]*name="([^"]*)"[^>]*r:id="([^"]*)"/g;
+  let m; while((m=re.exec(xml))!==null) sheets.push({name:m[1],rId:m[2]}); return sheets;
 }
-
 function parseRelsXml(xml) {
-  const map = new Map(); // rId → target
-  const re  = /<Relationship\b[^>]*Id="([^"]*)"[^>]*Target="([^"]*)"[^>]*/g;
-  let m;
-  while ((m = re.exec(xml)) !== null) map.set(m[1], m[2]);
-  return map;
+  const map=new Map(),re=/<Relationship\b[^>]*Id="([^"]*)"[^>]*Target="([^"]*)"/g;
+  let m; while((m=re.exec(xml))!==null) map.set(m[1],m[2]); return map;
 }
-
-// ── Main XLSX parser — returns Map<sheetName (lower), rows[][]> ──────────────
 async function parseXlsx(arrayBuffer) {
-  let entries;
-  try { entries = readZipEntries(arrayBuffer); }
-  catch(e) { throw new Error('Could not read file as XLSX. Is it a valid .xlsx bulk sheet? (' + e.message + ')'); }
-
-  // Shared strings (may not exist if no shared strings)
-  let sstStrings = [];
-  const sstXml = await extractZipEntry(arrayBuffer, entries, 'xl/sharedStrings.xml');
-  if (sstXml) sstStrings = parseSst(sstXml);
-
-  // Workbook + rels
-  const wbXml   = await extractZipEntry(arrayBuffer, entries, 'xl/workbook.xml');
-  const relsXml = await extractZipEntry(arrayBuffer, entries, 'xl/_rels/workbook.xml.rels');
-  if (!wbXml || !relsXml) throw new Error('Missing xl/workbook.xml or its .rels file. Not a standard XLSX.');
-
-  const sheetDefs = parseWorkbookXml(wbXml);
-  const relsMap   = parseRelsXml(relsXml);
-
-  const result = new Map(); // sheetName.toLowerCase() → rows[][]
-  for (const sd of sheetDefs) {
-    const target = relsMap.get(sd.rId);
-    if (!target) continue;
-    // Target may be: "worksheets/sheet1.xml", "/xl/worksheets/sheet1.xml", "../worksheets/sheet1.xml"
+  let entries; try { entries=readZipEntries(arrayBuffer); } catch(e){throw new Error('Could not read file as XLSX. ('+e.message+')');}
+  let sst=[]; const sstXml=await extractZipEntry(arrayBuffer,entries,'xl/sharedStrings.xml'); if(sstXml) sst=parseSst(sstXml);
+  const wbXml=await extractZipEntry(arrayBuffer,entries,'xl/workbook.xml');
+  const relsXml=await extractZipEntry(arrayBuffer,entries,'xl/_rels/workbook.xml.rels');
+  if(!wbXml||!relsXml) throw new Error('Missing xl/workbook.xml or its .rels — not a standard XLSX.');
+  const sheetDefs=parseWorkbookXml(wbXml), relsMap=parseRelsXml(relsXml), result=new Map();
+  for(const sd of sheetDefs){
+    const target=relsMap.get(sd.rId); if(!target) continue;
     let path;
-    if (target.startsWith('/xl/'))      path = target.slice(1);           // /xl/... → xl/...
-    else if (target.startsWith('../'))  path = 'xl/' + target.slice(3);   // ../worksheets/... → xl/worksheets/...
-    else if (target.startsWith('xl/'))  path = target;
-    else                                path = 'xl/' + target;
-    const shXml = await extractZipEntry(arrayBuffer, entries, path);
-    if (!shXml) continue;
-    const rows = parseSheetXml(shXml, sstStrings);
-    result.set(sd.name.toLowerCase(), rows);
+    if(target.startsWith('/xl/')) path=target.slice(1);
+    else if(target.startsWith('../')) path='xl/'+target.slice(3);
+    else if(target.startsWith('xl/')) path=target;
+    else path='xl/'+target;
+    const shXml=await extractZipEntry(arrayBuffer,entries,path); if(!shXml) continue;
+    result.set(sd.name.toLowerCase(), parseSheetXml(shXml, sst));
   }
   return result;
 }
 
 // =============================================================================
 // BULK SHEET PARSER
-// Extracts from the Amazon Ads Sponsored Products bulk sheet:
-//   1. ASIN → [{ campaign, adGroup, defaultBid }] from "Sponsored Products Product Ads"
-//   2. Existing keyword set from "Sponsored Products Keywords"
 // =============================================================================
+function csvToRows(text) {
+  return text.split('\n').map(line => {
+    const cols=[]; let cur='', inQ=false;
+    for(let i=0;i<line.length;i++){
+      const c=line[i];
+      if(c==='"'){if(inQ&&line[i+1]==='"'){cur+='"';i++;}else inQ=!inQ;}
+      else if(c===','&&!inQ){cols.push(cur.trim());cur='';}
+      else cur+=c;
+    }
+    cols.push(cur.trim()); return cols;
+  }).filter(r=>r.some(c=>c));
+}
+
 async function parseBulkSheet(file) {
   const buf = await file.arrayBuffer();
-
   let sheetMap;
   if (file.name.toLowerCase().endsWith('.csv')) {
-    // Treat as single-sheet CSV named "bulk"
-    const text = new TextDecoder('utf-8').decode(buf);
-    sheetMap   = new Map([['bulk', csvToRows(text)]]);
+    sheetMap = new Map([['bulk', csvToRows(new TextDecoder('utf-8').decode(buf))]]);
   } else {
     sheetMap = await parseXlsx(buf);
   }
 
-  // ── Find the main SP Campaigns sheet ────────────────────────────────────
-  // Amazon's bulk sheet puts ALL entity types (Campaign, Ad Group, Keyword,
-  // Product Ad, etc.) into ONE sheet: "Sponsored Products Campaigns".
-  // We scan it once and branch on the Entity column value.
-  const sheetNames = [...sheetMap.keys()];
-
   const findSheet = (...fragments) => {
     for (const [name, rows] of sheetMap) {
-      const n = name.replace(/[^a-z0-9]/g, ' ');
+      const n = name.replace(/[^a-z0-9]/g,' ');
       if (fragments.every(f => n.includes(f))) return rows;
     }
     return null;
   };
 
-  // Primary sheet: "Sponsored Products Campaigns" (contains all SP entity rows)
   const spSheet = findSheet('sponsored products campaigns')
                || findSheet('sponsored products')
                || findSheet('sp campaigns')
                || (sheetMap.size ? [...sheetMap.values()][0] : null);
 
   const warnings = [];
-  if (!spSheet) {
-    warnings.push(`Could not find Sponsored Products sheet. Sheets found: ${sheetNames.join(', ') || 'none — XLSX may have failed to parse'}`);
-  }
+  if (!spSheet) warnings.push(`Could not find Sponsored Products sheet. Sheets: ${[...sheetMap.keys()].join(', ')||'none'}`);
 
-  const existingKeys  = new Set();   // "keyword|||matchtype"
-  const adGroupBids   = new Map();   // adGroupKey → bid
-  const adGroupMeta   = new Map();   // adGroupKey → { campaign, adGroup }
-  const asinToAdGroups = new Map();  // ASIN → Set<adGroupKey>
+  const existingKeys   = new Set();   // "keyword|||matchtype"
+  const adGroupBids    = new Map();   // agKey → bid
+  const adGroupMeta    = new Map();   // agKey → { campaign, adGroup }
+  const asinToAdGroups = new Map();   // ASIN → Set<agKey>
+  // campaign-level metrics: spend, sales, clicks, impressions, orders
+  const campaignMetrics = new Map();  // agKey → { spend, sales, clicks, impressions, orders }
 
   if (spSheet && spSheet.length > 1) {
-    const hdr = spSheet[0].map(h => (h || '').toLowerCase().trim());
-
-    // Column indices — using the exact names from the real bulk sheet
+    const hdr  = spSheet[0].map(h => (h||'').toLowerCase().trim());
     const iEnt  = hdr.findIndex(h => h === 'entity');
     const iSt   = hdr.findIndex(h => h === 'state');
-
-    // Campaign/Ad Group names: bulk sheet has editable (J/K) + informational (L/M).
-    // For Keyword and Product Ad rows, J/K are blank — only L/M are filled.
-    // So prefer informational columns when available.
     const iCamEdit = hdr.findIndex(h => h === 'campaign name');
     const iAGEdit  = hdr.findIndex(h => h === 'ad group name');
     const iCamInfo = hdr.findIndex(h => h === 'campaign name (informational only)');
     const iAGInfo  = hdr.findIndex(h => h === 'ad group name (informational only)');
-
-    // Keyword columns
     const iKW   = hdr.findIndex(h => h === 'keyword text');
     const iMT   = hdr.findIndex(h => h === 'match type');
     const iBid  = hdr.findIndex(h => h === 'bid');
-
-    // Product Ad columns — ASIN (col W) takes priority over SKU (col V)
     const iASIN = hdr.findIndex(h => h === 'asin');
     const iSKU  = hdr.findIndex(h => h === 'sku');
+    const iAGBid= hdr.findIndex(h => h === 'ad group default bid' || h === 'ad group default bid (informational only)');
+    // Performance columns (may be absent in structure-only bulk)
+    const iSpend = hdr.findIndex(h => h === 'spend');
+    const iSales = hdr.findIndex(h => h === 'sales' || h === '14 day total sales');
+    const iClicks= hdr.findIndex(h => h === 'clicks');
+    const iImpr  = hdr.findIndex(h => h === 'impressions');
+    const iOrders= hdr.findIndex(h => h === 'orders' || h === '14 day total orders (#)');
 
-    // Ad Group default bid
-    const iAGBid = hdr.findIndex(h => h === 'ad group default bid' || h === 'ad group default bid (informational only)');
-
-    const getCamAG = (row) => {
-      // Use informational cols first (always populated), fall back to editable
-      const cam = (iCamInfo >= 0 ? row[iCamInfo] : '') || (iCamEdit >= 0 ? row[iCamEdit] : '') || '';
-      const ag  = (iAGInfo  >= 0 ? row[iAGInfo]  : '') || (iAGEdit  >= 0 ? row[iAGEdit]  : '') || '';
+    const fn = (row, idx) => idx >= 0 ? parseFloat(row[idx]) || 0 : 0;
+    const getCamAG = row => {
+      const cam = (iCamInfo>=0?row[iCamInfo]:'')||(iCamEdit>=0?row[iCamEdit]:'')||'';
+      const ag  = (iAGInfo >=0?row[iAGInfo] :'')||(iAGEdit >=0?row[iAGEdit] :'')||'';
       return { cam: cam.trim(), ag: ag.trim() };
     };
 
     for (let i = 1; i < spSheet.length; i++) {
       const row   = spSheet[i];
-      const ent   = (iEnt >= 0 ? row[iEnt] : '').trim();
-      const state = (iSt  >= 0 ? row[iSt]  : '').trim().toLowerCase();
-      if (state === 'archived') continue;  // archived = deleted; paused still counts
+      const ent   = (iEnt>=0?row[iEnt]:'').trim();
+      const state = (iSt >=0?row[iSt] :'').trim().toLowerCase();
+      if (state === 'archived') continue;
 
       if (ent === 'Keyword') {
-        const kw = (iKW >= 0 ? row[iKW] : '').trim().toLowerCase();
-        const mt = (iMT >= 0 ? row[iMT] : '').trim().toLowerCase() || 'broad';
+        const kw = (iKW>=0?row[iKW]:'').trim().toLowerCase();
+        const mt = (iMT>=0?row[iMT]:'').trim().toLowerCase()||'broad';
         if (!kw) continue;
-
-        // Record as existing regardless of paused/enabled —
-        // a paused keyword is still targeting, just not spending
         existingKeys.add(kw + '|||' + mt);
-
         const { cam, ag } = getCamAG(row);
         if (cam && ag) {
           const agKey = cam + '|||' + ag;
-          const bid   = parseFloat(iBid >= 0 ? row[iBid] : '');
-          if (!isNaN(bid) && !adGroupBids.has(agKey)) {
-            adGroupBids.set(agKey, bid);
-            adGroupMeta.set(agKey, { campaign: cam, adGroup: ag });
-          } else if (!adGroupMeta.has(agKey)) {
-            adGroupMeta.set(agKey, { campaign: cam, adGroup: ag });
-          }
+          const bid   = parseFloat(iBid>=0?row[iBid]:'');
+          if (!isNaN(bid) && !adGroupBids.has(agKey)) adGroupBids.set(agKey, bid);
+          if (!adGroupMeta.has(agKey)) adGroupMeta.set(agKey, { campaign: cam, adGroup: ag });
         }
       }
 
       if (ent === 'Product Ad') {
-        const asin = (iASIN >= 0 ? row[iASIN] : '').trim().toUpperCase()
-                  || (iSKU  >= 0 ? row[iSKU]  : '').trim().toUpperCase();
+        const asin = (iASIN>=0?row[iASIN]:'').trim().toUpperCase()
+                  || (iSKU >=0?row[iSKU] :'').trim().toUpperCase();
         if (!asin) continue;
-
         const { cam, ag } = getCamAG(row);
         if (!cam || !ag) continue;
-
         const agKey = cam + '|||' + ag;
         if (!asinToAdGroups.has(asin)) asinToAdGroups.set(asin, new Set());
         asinToAdGroups.get(asin).add(agKey);
-
-        // Use ad group default bid for the bulk download
-        const agBid = parseFloat(iAGBid >= 0 ? row[iAGBid] : '') || parseFloat(iBid >= 0 ? row[iBid] : '');
+        const agBid = parseFloat(iAGBid>=0?row[iAGBid]:'') || parseFloat(iBid>=0?row[iBid]:'');
         if (!isNaN(agBid) && !adGroupBids.has(agKey)) adGroupBids.set(agKey, agBid);
         if (!adGroupMeta.has(agKey)) adGroupMeta.set(agKey, { campaign: cam, adGroup: ag });
       }
 
       if (ent === 'Ad Group') {
-        // Harvest ad group default bid from ad group rows directly
         const { cam, ag } = getCamAG(row);
         if (!cam || !ag) continue;
-        const agKey = cam + '|||' + ag;
-        const defBid = parseFloat(iAGBid >= 0 ? row[iAGBid] : '');
+        const agKey  = cam + '|||' + ag;
+        const defBid = parseFloat(iAGBid>=0?row[iAGBid]:'');
         if (!isNaN(defBid) && !adGroupBids.has(agKey)) adGroupBids.set(agKey, defBid);
         if (!adGroupMeta.has(agKey)) adGroupMeta.set(agKey, { campaign: cam, adGroup: ag });
+      }
+
+      // Harvest performance from Campaign rows if present
+      if (ent === 'Campaign') {
+        const { cam } = getCamAG(row);
+        if (!cam) continue;
+        const key = cam;
+        if (!campaignMetrics.has(key)) campaignMetrics.set(key, { spend:0, sales:0, clicks:0, impressions:0, orders:0 });
+        const m = campaignMetrics.get(key);
+        m.spend       += fn(row, iSpend);
+        m.sales       += fn(row, iSales);
+        m.clicks      += fn(row, iClicks);
+        m.impressions += fn(row, iImpr);
+        m.orders      += fn(row, iOrders);
       }
     }
   }
 
-  const totalKw  = existingKeys.size;
-  const totalAGs = adGroupMeta.size;
-  const totalAsins = asinToAdGroups.size;
-
   return {
-    existingKeys,
-    adGroupBids,
-    adGroupMeta,
-    asinToAdGroups,
-    stats: { totalKw, totalAGs, totalAsins },
+    existingKeys, adGroupBids, adGroupMeta, asinToAdGroups, campaignMetrics,
+    stats: { totalKw: existingKeys.size, totalAGs: adGroupMeta.size, totalAsins: asinToAdGroups.size },
     warnings,
   };
 }
 
-// Simple CSV to rows (for bulk CSV fallback)
-function csvToRows(text) {
-  return text.split('\n').map(line => {
-    const cols = []; let cur = ''; let inQ = false;
-    for (let i = 0; i < line.length; i++) {
-      const c = line[i];
-      if (c === '"') { if (inQ && line[i+1]==='"'){cur+='"';i++;}else inQ=!inQ; }
-      else if (c === ',' && !inQ) { cols.push(cur.trim()); cur=''; }
-      else cur += c;
+// =============================================================================
+// KEYWORD CLASSIFICATION (heuristic, deterministic)
+// Branded  — term contains a known brand fragment (from adGroup/campaign names)
+// Competitor — term contains a brand-like word that does NOT match our own brands
+// Generic  — everything else
+// =============================================================================
+let ownBrandTokens = new Set();   // populated from bulk sheet campaign/adGroup names
+
+function buildBrandTokens() {
+  ownBrandTokens = new Set();
+  if (!bulkData) return;
+  for (const [, meta] of bulkData.adGroupMeta) {
+    // Extract candidate brand words: ≥4 chars, not common stopwords
+    const STOP = new Set(['sponsored','products','brand','exact','broad','phrase','auto','manual','campaign','group','defense','defence','targeting','catch','all','generic','comp','competitor','conquesting']);
+    const words = (meta.campaign + ' ' + meta.adGroup).toLowerCase().replace(/[^a-z0-9 ]/g,' ').split(/\s+/);
+    for (const w of words) {
+      if (w.length >= 4 && !STOP.has(w) && !/^\d+$/.test(w)) ownBrandTokens.add(w);
     }
-    cols.push(cur.trim()); return cols;
-  }).filter(r => r.some(c => c));
+  }
+}
+
+// Common competitor signal words — terms containing these are likely competitor searches
+const COMPETITOR_SIGNALS = /\b(vs\.?|versus|alternative|competitor|competitor|rival|instead of|compare|compared)\b/i;
+
+function classifyKeyword(term) {
+  const lower = term.toLowerCase();
+  // Check own brand first
+  for (const token of ownBrandTokens) {
+    if (lower.includes(token)) return 'branded';
+  }
+  // Competitor signal phrases
+  if (COMPETITOR_SIGNALS.test(lower)) return 'competitor';
+  // Generic
+  return 'generic';
 }
 
 // =============================================================================
-// ASIN PARSING & VALIDATION
+// ANNOTATE — attach status, adGroups, kwType, campaignMetrics to each result
 // =============================================================================
-const ASIN_RE = /^B0[A-Z0-9]{8}$/i;
+function annotateResults() {
+  buildBrandTokens();
+  annotatedResults = parsedResults.map(r => {
+    const kwType = bulkData ? classifyKeyword(r.searchTerm) : 'generic';
+    let status = null, adGroups = [], campaignMetricsArr = [];
 
-function parseAsins(raw) {
-  const tokens = raw.split(/[\s,;\n]+/).map(t => t.trim()).filter(Boolean);
-  const valid   = [];
-  const invalid = [];
-  const seen = new Set();
-  for (const t of tokens) {
-    if (ASIN_RE.test(t)) {
-      const u = t.toUpperCase();
-      if (!seen.has(u)) { valid.push(u); seen.add(u); }
+    if (bulkData) {
+      const kwKey   = r.searchTerm.toLowerCase() + '|||';
+      const isAdded = ['broad','phrase','exact'].some(mt => bulkData.existingKeys.has(kwKey + mt));
+      status = isAdded ? 'added' : 'new';
+
+      const agSet = bulkData.asinToAdGroups.get(r.asin) || new Set();
+      adGroups = [...agSet].map(agKey => {
+        const meta = bulkData.adGroupMeta.get(agKey) || { campaign: agKey, adGroup: '' };
+        const bid  = bulkData.adGroupBids.get(agKey) || 0.75;
+        const cm   = bulkData.campaignMetrics.get(meta.campaign) || { spend:0, sales:0, clicks:0, impressions:0, orders:0 };
+        const avgCpc = cm.clicks > 0 ? cm.spend / cm.clicks : bid;
+        return { ...meta, bid, avgCpc, metrics: cm };
+      });
+    }
+
+    return { ...r, kwType, status, adGroups };
+  });
+}
+
+// =============================================================================
+// VIEW KEY → filter fn
+// =============================================================================
+function getViewRows(viewKey) {
+  const [kwType, innerTab] = viewKey.split('-'); // e.g. "generic", "notadded"
+  const isAdded = innerTab === 'added';
+  return annotatedResults.filter(r => {
+    if (r.kwType !== kwType) return false;
+    if (bulkData === null) return !isAdded;          // no bulk = show all in not-added
+    return isAdded ? r.status === 'added' : r.status === 'new';
+  });
+}
+
+// =============================================================================
+// TABS — outer and inner wiring
+// =============================================================================
+document.querySelectorAll('.outer-tab-btn').forEach(btn => {
+  btn.addEventListener('click', () => {
+    document.querySelectorAll('.outer-tab-btn').forEach(b => b.classList.remove('active'));
+    document.querySelectorAll('.outer-tab-panel').forEach(p => p.classList.remove('active'));
+    btn.classList.add('active');
+    document.getElementById('panel-' + btn.dataset.outer).classList.add('active');
+  });
+});
+
+document.querySelectorAll('.inner-tab-btn').forEach(btn => {
+  btn.addEventListener('click', () => {
+    const parent = btn.closest('.outer-tab-panel');
+    parent.querySelectorAll('.inner-tab-btn').forEach(b => b.classList.remove('active'));
+    parent.querySelectorAll('.inner-tab-panel').forEach(p => p.classList.remove('active'));
+    btn.classList.add('active');
+    document.getElementById('panel-' + btn.dataset.inner).classList.add('active');
+  });
+});
+
+// =============================================================================
+// RENDER ALL VIEWS
+// =============================================================================
+function renderAllViews() {
+  updateCounts();
+  for (const vk of VIEW_KEYS) {
+    const vs   = viewState[vk];
+    vs.query   = '';  // reset search on re-run
+    vs.page    = 0;
+    const searchEl = document.querySelector(`[data-search="${vk}"]`);
+    if (searchEl) searchEl.value = '';
+    recomputeFiltered(vk);
+    renderView(vk);
+  }
+  renderSummaryStrip();
+  resultsSection.style.display = 'block';
+  window.scrollTo({ top: resultsSection.offsetTop - 12, behavior: 'smooth' });
+
+  // Enable/disable bulk download buttons
+  ['generic','branded','competitor'].forEach(type => {
+    const btn = document.getElementById(`bulk-dl-${type}-notadded`);
+    if (btn) btn.disabled = !(bulkData && annotatedResults.some(r => r.kwType === type && r.status === 'new'));
+  });
+}
+
+function updateCounts() {
+  for (const vk of VIEW_KEYS) {
+    const rows = getViewRows(vk);
+    const el   = document.getElementById('cnt-' + vk);
+    if (el) el.textContent = rows.length.toLocaleString();
+  }
+  // Outer tab counts = total (added + not added) per type
+  ['generic','branded','competitor'].forEach(type => {
+    const total = annotatedResults.filter(r => r.kwType === type).length;
+    const el    = document.getElementById('cnt-' + type);
+    if (el) el.textContent = total.toLocaleString();
+  });
+}
+
+function recomputeFiltered(vk) {
+  const vs   = viewState[vk];
+  const q    = vs.query.toLowerCase().trim();
+  let rows   = getViewRows(vk);
+  if (q) rows = rows.filter(r =>
+    r.searchTerm.toLowerCase().includes(q) ||
+    r.asin.toLowerCase().includes(q) ||
+    r.adGroups.some(ag => ag.campaign.toLowerCase().includes(q) || ag.adGroup.toLowerCase().includes(q))
+  );
+  // Sort
+  rows = [...rows].sort((a, b) => {
+    let av = a[vs.sortCol], bv = b[vs.sortCol];
+    if (vs.sortCol === 'estVolume') { av = a.estVolumeHigh; bv = b.estVolumeHigh; }
+    if (typeof av === 'string') av = av.toLowerCase();
+    if (typeof bv === 'string') bv = bv.toLowerCase();
+    if (av < bv) return vs.sortDir === 'asc' ? -1 : 1;
+    if (av > bv) return vs.sortDir === 'asc' ? 1 : -1;
+    return 0;
+  });
+  vs.filtered = rows;
+}
+
+function renderView(vk) {
+  const isAdded  = vk.endsWith('-added');
+  const theadEl  = document.getElementById('th-' + vk);
+  const tbodyEl  = document.getElementById('tb-' + vk);
+  const pgEl     = document.getElementById('pg-' + vk);
+  const vs       = viewState[vk];
+  const { filtered, page } = vs;
+
+  // Build header (once per render)
+  const cols = isAdded ? getAddedCols() : getNotAddedCols();
+  theadEl.innerHTML = '';
+  const trh = document.createElement('tr');
+  for (const col of cols) {
+    const th = document.createElement('th');
+    th.innerHTML = col.label + '<span class="sort-arrow"></span>';
+    if (col.sortable !== false) {
+      th.style.cursor = 'pointer';
+      th.addEventListener('click', () => {
+        if (vs.sortCol === col.key) vs.sortDir = vs.sortDir === 'asc' ? 'desc' : 'asc';
+        else { vs.sortCol = col.key; vs.sortDir = 'asc'; }
+        recomputeFiltered(vk);
+        renderView(vk);
+      });
+    } else { th.style.cursor = 'default'; }
+    trh.appendChild(th);
+  }
+  theadEl.appendChild(trh);
+  updateSortArrows(vk, cols);
+
+  // Rows
+  const start = page * PAGE_SIZE;
+  const slice = filtered.slice(start, start + PAGE_SIZE);
+  tbodyEl.innerHTML = '';
+
+  if (!slice.length) {
+    const tr = document.createElement('tr');
+    const td = document.createElement('td');
+    td.colSpan = cols.length;
+    td.innerHTML = `<div class="empty-state"><div class="empty-state-icon">${filtered.length ? '🔍' : '📭'}</div>${filtered.length ? 'No rows match your filter.' : 'No keywords in this category yet.'}</div>`;
+    tr.appendChild(td); tbodyEl.appendChild(tr);
+  } else {
+    const frag = document.createDocumentFragment();
+    for (const r of slice) frag.appendChild(isAdded ? buildAddedRow(r) : buildNotAddedRow(r));
+    tbodyEl.appendChild(frag);
+  }
+
+  renderPagination(vk, pgEl);
+}
+
+function updateSortArrows(vk, cols) {
+  const vs      = viewState[vk];
+  const theadEl = document.getElementById('th-' + vk);
+  theadEl.querySelectorAll('th').forEach((th, i) => {
+    const col = cols[i];
+    if (!col) return;
+    const arrow = th.querySelector('.sort-arrow');
+    th.classList.toggle('sorted', vs.sortCol === col.key);
+    if (arrow) arrow.textContent = vs.sortCol === col.key ? (vs.sortDir === 'asc' ? ' ↑' : ' ↓') : '';
+  });
+}
+
+// =============================================================================
+// COLUMN DEFINITIONS
+// =============================================================================
+function getNotAddedCols() {
+  const base = [
+    { key: 'asin',           label: 'ASIN'               },
+    { key: 'searchTerm',     label: 'Keyword'             },
+    { key: 'sfr',            label: 'SF Rank'             },
+    { key: 'estVolume',      label: 'Est. Monthly Vol.'   },
+    { key: 'clickPosition',  label: 'Click Pos.'          },
+    { key: 'clickShare',     label: 'Click Share'         },
+    { key: 'conversionShare',label: 'Conv. Share'         },
+    { key: 'rationale',      label: 'Rationale', sortable: false },
+  ];
+  if (bulkData) {
+    base.splice(1, 0, { key: 'campaign', label: 'Target Campaign', sortable: false });
+    base.splice(2, 0, { key: 'adGroup',  label: 'Target Ad Group', sortable: false });
+    base.splice(7, 0, { key: 'bid',      label: 'Suggested Bid'   });
+  }
+  return base;
+}
+
+function getAddedCols() {
+  const base = [
+    { key: 'campaign',       label: 'Campaign',    sortable: false },
+    { key: 'adGroup',        label: 'Ad Group',    sortable: false },
+    { key: 'asin',           label: 'ASIN'         },
+    { key: 'searchTerm',     label: 'Keyword'      },
+    { key: 'sfr',            label: 'SF Rank'      },
+    { key: 'estVolume',      label: 'Est. Monthly Vol.' },
+    { key: 'clickPosition',  label: 'Click Pos.'   },
+    { key: 'clickShare',     label: 'Click Share'  },
+    { key: 'conversionShare',label: 'Conv. Share'  },
+    { key: 'spend',          label: 'Camp. Spend'  },
+    { key: 'acos',           label: 'ACOS'         },
+    { key: 'cvr',            label: 'CVR'          },
+    { key: 'ctr',            label: 'CTR'          },
+    { key: 'avgCpc',         label: 'Avg CPC'      },
+  ];
+  return base;
+}
+
+// =============================================================================
+// ROW BUILDERS
+// =============================================================================
+function buildNotAddedRow(r) {
+  const tr = document.createElement('tr');
+  if (r.conversionShare > r.clickShare) tr.className = 'opp-row';
+
+  const ag0 = r.adGroups && r.adGroups[0];
+
+  if (bulkData) {
+    tr.appendChild(tdMono(r.asin));
+    tr.appendChild(tdText(ag0 ? ag0.campaign : '(not mapped)', 'kw-cell'));
+    tr.appendChild(tdText(ag0 ? ag0.adGroup  : '(not mapped)', 'kw-cell'));
+    tr.appendChild(tdKw(r));
+    tr.appendChild(tdNum(fmtNum(r.sfr)));
+    tr.appendChild(tdNum(fmtVolume(r.estVolumeLow, r.estVolumeHigh)));
+    tr.appendChild(tdBadge(r.clickPosition));
+    tr.appendChild(tdNum(r.clickShare.toFixed(1) + '%'));
+    tr.appendChild(tdNum(r.conversionShare.toFixed(1) + '%'));
+    // Suggested bid = avg CPC of campaign + 10%, fall back to ad group bid
+    const base = ag0 ? ag0.avgCpc || ag0.bid : 0.75;
+    const sugBid = suggestedBid(r, base);
+    tr.appendChild(tdNum('$' + sugBid));
+    tr.appendChild(tdRationale(r));
+  } else {
+    tr.appendChild(tdMono(r.asin));
+    tr.appendChild(tdKw(r));
+    tr.appendChild(tdNum(fmtNum(r.sfr)));
+    tr.appendChild(tdNum(fmtVolume(r.estVolumeLow, r.estVolumeHigh)));
+    tr.appendChild(tdBadge(r.clickPosition));
+    tr.appendChild(tdNum(r.clickShare.toFixed(1) + '%'));
+    tr.appendChild(tdNum(r.conversionShare.toFixed(1) + '%'));
+    tr.appendChild(tdRationale(r));
+  }
+  return tr;
+}
+
+function buildAddedRow(r) {
+  const tr  = document.createElement('tr');
+  const ag0 = r.adGroups && r.adGroups[0];
+  const cm  = ag0 ? ag0.metrics : null;
+
+  const spend  = cm ? cm.spend  : 0;
+  const sales  = cm ? cm.sales  : 0;
+  const clicks = cm ? cm.clicks : 0;
+  const impr   = cm ? cm.impressions : 0;
+  const orders = cm ? cm.orders : 0;
+  const acos   = sales  > 0 ? spend / sales  : null;
+  const cvr    = clicks > 0 ? orders / clicks : null;
+  const ctr    = impr   > 0 ? clicks / impr   : null;
+  const avgCpc = clicks > 0 ? spend / clicks  : null;
+
+  tr.appendChild(tdText(ag0 ? ag0.campaign : '—', 'kw-cell'));
+  tr.appendChild(tdText(ag0 ? ag0.adGroup  : '—', 'kw-cell'));
+  tr.appendChild(tdMono(r.asin));
+  tr.appendChild(tdKw(r));
+  tr.appendChild(tdNum(fmtNum(r.sfr)));
+  tr.appendChild(tdNum(fmtVolume(r.estVolumeLow, r.estVolumeHigh)));
+  tr.appendChild(tdBadge(r.clickPosition));
+  tr.appendChild(tdNum(r.clickShare.toFixed(1) + '%'));
+  tr.appendChild(tdNum(r.conversionShare.toFixed(1) + '%'));
+  tr.appendChild(tdNum(spend > 0 ? '$' + fmtK(spend) : '—'));
+  tr.appendChild(tdMetric(acos,  v => (v*100).toFixed(1) + '%', 0.4, true));   // red if > 40%
+  tr.appendChild(tdMetric(cvr,   v => (v*100).toFixed(1) + '%', 0.05, false)); // green if > 5%
+  tr.appendChild(tdMetric(ctr,   v => (v*100).toFixed(2) + '%', 0.002, false));
+  tr.appendChild(tdNum(avgCpc !== null ? '$' + avgCpc.toFixed(2) : '—'));
+  return tr;
+}
+
+// ── TD helpers ───────────────────────────────────────────────────────────────
+function tdText(val, cls) {
+  const td = document.createElement('td');
+  if (cls) td.className = cls;
+  td.textContent = val || '—';
+  return td;
+}
+function tdMono(val) {
+  const td = document.createElement('td');
+  td.className = 'mono'; td.textContent = val;
+  return td;
+}
+function tdNum(val) {
+  const td = document.createElement('td');
+  td.className = 'num-cell'; td.textContent = val;
+  return td;
+}
+function tdBadge(pos) {
+  const td = document.createElement('td');
+  const sp = document.createElement('span');
+  sp.className = 'pos-badge pos-' + pos;
+  sp.textContent = '#' + pos;
+  td.appendChild(sp); return td;
+}
+function tdKw(r) {
+  const td  = document.createElement('td');
+  td.className = 'kw-cell';
+  const pill = document.createElement('span');
+  pill.className = 'kw-type-pill kw-type-' + r.kwType;
+  pill.textContent = r.kwType.charAt(0).toUpperCase() + r.kwType.slice(1);
+  td.appendChild(pill);
+  td.appendChild(document.createTextNode(r.searchTerm));
+  return td;
+}
+function tdRationale(r) {
+  const td = document.createElement('td');
+  td.className = 'rationale-cell';
+  const reasons = buildRationale(r);
+  td.innerHTML = reasons.map(s => `<strong>·</strong> ${escHtml(s)}`).join('<br>');
+  return td;
+}
+function tdMetric(val, fmt, threshold, invertBad) {
+  const td = document.createElement('td');
+  td.className = 'num-cell';
+  if (val === null) { td.textContent = '—'; td.style.color = 'var(--muted)'; return td; }
+  td.textContent = fmt(val);
+  const isBad = invertBad ? val > threshold : val < threshold;
+  td.style.color = isBad ? 'var(--red)' : 'var(--green)';
+  td.style.fontWeight = '600';
+  return td;
+}
+
+// =============================================================================
+// RATIONALE & BID
+// =============================================================================
+function buildRationale(r) {
+  const reasons = [];
+  if (r.sfr <= 1000)                          reasons.push('Top 1K search term');
+  else if (r.sfr <= 10000)                    reasons.push('High-volume (SFR < 10K)');
+  if (r.clickPosition === 1)                  reasons.push('#1 clicked ASIN — top relevance');
+  if (r.conversionShare > r.clickShare)       reasons.push('CVR > CTR — converts better than it clicks');
+  if (r.clickShare >= 20)                     reasons.push(`Dominates clicks (${r.clickShare.toFixed(0)}% share)`);
+  else if (r.clickShare >= 10)                reasons.push(`Strong click share (${r.clickShare.toFixed(0)}%)`);
+  if (r.conversionShare >= 20)                reasons.push(`High conv. share (${r.conversionShare.toFixed(0)}%)`);
+  if (reasons.length === 0)                   reasons.push('Appears in top 3 clicked ASINs');
+  return reasons;
+}
+
+function suggestedBid(r, baseCpc) {
+  const base = baseCpc > 0 ? baseCpc : 0.75;
+  // Start at avg CPC + 10%, then add signal premiums
+  let bid = base * 1.10;
+  if (r.sfr <= 1000)                          bid *= 1.20;
+  else if (r.sfr <= 10000)                    bid *= 1.10;
+  if (r.clickPosition === 1)                  bid *= 1.10;
+  if (r.conversionShare > r.clickShare)       bid *= 1.10;
+  return Math.min(bid, base * 1.5).toFixed(2); // cap at 50% above base
+}
+
+// =============================================================================
+// PAGINATION
+// =============================================================================
+function renderPagination(vk, pgEl) {
+  const vs    = viewState[vk];
+  const total = vs.filtered.length;
+  const pages = Math.max(1, Math.ceil(total / PAGE_SIZE));
+  const cur   = vs.page;
+
+  if (total === 0) { pgEl.innerHTML = ''; return; }
+
+  const start = cur * PAGE_SIZE + 1;
+  const end   = Math.min((cur + 1) * PAGE_SIZE, total);
+
+  pgEl.innerHTML = `
+    <span class="pagination-info">Showing ${start}–${end} of ${total.toLocaleString()} keywords</span>
+    <div class="pagination-controls" id="pgc-${vk}"></div>
+  `;
+
+  const ctrl = pgEl.querySelector('.pagination-controls');
+
+  // Prev
+  const prev = makePgBtn('← Prev', cur === 0);
+  prev.addEventListener('click', () => { vs.page--; renderView(vk); });
+  ctrl.appendChild(prev);
+
+  // Page numbers — show max 7 buttons with ellipsis
+  const pageNums = buildPageNums(cur, pages);
+  let lastWasNum = false;
+  for (const p of pageNums) {
+    if (p === '…') {
+      if (lastWasNum) { const ell = document.createElement('span'); ell.className = 'pg-ellipsis'; ell.textContent = '…'; ctrl.appendChild(ell); }
+      lastWasNum = false;
     } else {
-      invalid.push(t);
+      const btn = makePgBtn(String(p + 1), false);
+      if (p === cur) btn.classList.add('active');
+      btn.addEventListener('click', () => { vs.page = p; renderView(vk); });
+      ctrl.appendChild(btn);
+      lastWasNum = true;
     }
   }
-  return { valid, invalid };
+
+  // Next
+  const next = makePgBtn('Next →', cur >= pages - 1);
+  next.addEventListener('click', () => { vs.page++; renderView(vk); });
+  ctrl.appendChild(next);
 }
 
-function renderAsinTags() {
-  const { valid, invalid } = parseAsins(asinInput.value);
-  asinTagsEl.innerHTML = '';
-  for (const a of valid) {
-    const span = document.createElement('span');
-    span.className = 'asin-tag valid';
-    span.textContent = a;
-    asinTagsEl.appendChild(span);
+function makePgBtn(label, disabled) {
+  const btn = document.createElement('button');
+  btn.className = 'pg-btn';
+  btn.textContent = label;
+  btn.disabled = disabled;
+  return btn;
+}
+
+function buildPageNums(cur, pages) {
+  if (pages <= 7) return Array.from({length: pages}, (_, i) => i);
+  const out = [];
+  // Always show: first, last, cur-1, cur, cur+1
+  const always = new Set([0, pages-1, cur-1, cur, cur+1].filter(p => p >= 0 && p < pages));
+  let prev = -1;
+  for (let p = 0; p < pages; p++) {
+    if (always.has(p)) {
+      if (prev !== -1 && p > prev + 1) out.push('…');
+      out.push(p); prev = p;
+    }
   }
-  for (const a of invalid) {
-    const span = document.createElement('span');
-    span.className = 'asin-tag invalid';
-    span.title = 'Not a valid ASIN (B0 + 8 alphanumeric)';
-    span.textContent = a + ' ✗';
-    asinTagsEl.appendChild(span);
-  }
-  checkRunReady();
-}
-
-asinInput.addEventListener('input', renderAsinTags);
-
-// =============================================================================
-// RUN BUTTON GUARD
-// =============================================================================
-function checkRunReady() {
-  const { valid } = parseAsins(asinInput.value);
-  runBtn.disabled = !(fileReady && valid.length > 0);
+  return out;
 }
 
 // =============================================================================
-// FILE DROP / BROWSE — Brand Analytics CSV
+// SUMMARY STRIP
+// =============================================================================
+function renderSummaryStrip() {
+  const total   = annotatedResults.length;
+  const newCount= annotatedResults.filter(r => r.status === 'new').length;
+  const added   = annotatedResults.filter(r => r.status === 'added').length;
+  const bestSFR = annotatedResults.reduce((m, r) => r.sfr < m ? r.sfr : m, Infinity);
+  const opps    = annotatedResults.filter(r => r.conversionShare > r.clickShare).length;
+  const branded = annotatedResults.filter(r => r.kwType === 'branded').length;
+  const comp    = annotatedResults.filter(r => r.kwType === 'competitor').length;
+  const generic = annotatedResults.filter(r => r.kwType === 'generic').length;
+
+  summaryStrip.innerHTML = `
+    <div class="summary-stat"><strong>${fmtNum(total)}</strong><small>Total keywords</small></div>
+    <div class="summary-stat"><strong>${fmtNum(bestSFR === Infinity ? 0 : bestSFR)}</strong><small>Best SFR (lowest)</small></div>
+    <div class="summary-stat amber"><strong>${fmtNum(opps)}</strong><small>CVR &gt; CTR opportunities</small></div>
+    <div class="summary-stat"><strong>${fmtNum(generic)}</strong><small>Generic</small></div>
+    <div class="summary-stat blue"><strong>${fmtNum(branded)}</strong><small>Branded</small></div>
+    <div class="summary-stat"><strong>${fmtNum(comp)}</strong><small>Competitor</small></div>
+    ${bulkData ? `<div class="summary-stat green"><strong>${fmtNum(newCount)}</strong><small>New to add</small></div>
+    <div class="summary-stat"><strong>${fmtNum(added)}</strong><small>Already added</small></div>` : ''}
+  `;
+}
+
+// =============================================================================
+// EXPORTS
+// =============================================================================
+document.querySelectorAll('[data-export]').forEach(btn => {
+  btn.addEventListener('click', () => {
+    const vk      = btn.dataset.export;
+    const isAdded = vk.endsWith('-added');
+    const rows    = viewState[vk].filtered;
+    let lines;
+    if (isAdded) {
+      lines = ['Campaign,Ad Group,ASIN,Keyword,SF Rank,Est. Volume,Click Pos,Click Share%,Conv Share%,Camp Spend,ACOS,CVR,CTR,Avg CPC'];
+      for (const r of rows) {
+        const ag0 = r.adGroups && r.adGroups[0];
+        const cm  = ag0 ? ag0.metrics : null;
+        const spend  = cm ? cm.spend  : 0;
+        const sales  = cm ? cm.sales  : 0;
+        const clicks = cm ? cm.clicks : 0;
+        const impr   = cm ? cm.impressions : 0;
+        const orders = cm ? cm.orders : 0;
+        lines.push([
+          csvEsc(ag0 ? ag0.campaign : ''),
+          csvEsc(ag0 ? ag0.adGroup : ''),
+          csvEsc(r.asin),
+          csvEsc(r.searchTerm),
+          r.sfr,
+          `"${fmtK(r.estVolumeLow)}–${fmtK(r.estVolumeHigh)}"`,
+          r.clickPosition,
+          r.clickShare.toFixed(2) + '%',
+          r.conversionShare.toFixed(2) + '%',
+          spend.toFixed(2),
+          sales > 0 ? (spend/sales*100).toFixed(1)+'%' : '',
+          clicks > 0 ? (orders/clicks*100).toFixed(1)+'%' : '',
+          impr  > 0 ? (clicks/impr*100).toFixed(2)+'%' : '',
+          clicks > 0 ? (spend/clicks).toFixed(2) : '',
+        ].join(','));
+      }
+    } else {
+      const hasBulk = !!bulkData;
+      const header  = hasBulk
+        ? 'ASIN,Target Campaign,Target Ad Group,Keyword,SF Rank,Est. Volume,Click Pos,Click Share%,Conv Share%,Suggested Bid,Rationale'
+        : 'ASIN,Keyword,SF Rank,Est. Volume,Click Pos,Click Share%,Conv Share%,Rationale';
+      lines = [header];
+      for (const r of rows) {
+        const ag0 = r.adGroups && r.adGroups[0];
+        const base = ag0 ? (ag0.avgCpc || ag0.bid) : 0.75;
+        const row  = hasBulk ? [
+          csvEsc(r.asin),
+          csvEsc(ag0 ? ag0.campaign : '(not mapped)'),
+          csvEsc(ag0 ? ag0.adGroup  : '(not mapped)'),
+          csvEsc(r.searchTerm),
+          r.sfr,
+          `"${fmtK(r.estVolumeLow)}–${fmtK(r.estVolumeHigh)}"`,
+          r.clickPosition,
+          r.clickShare.toFixed(2) + '%',
+          r.conversionShare.toFixed(2) + '%',
+          suggestedBid(r, base),
+          csvEsc(buildRationale(r).join(' | ')),
+        ] : [
+          csvEsc(r.asin),
+          csvEsc(r.searchTerm),
+          r.sfr,
+          `"${fmtK(r.estVolumeLow)}–${fmtK(r.estVolumeHigh)}"`,
+          r.clickPosition,
+          r.clickShare.toFixed(2) + '%',
+          r.conversionShare.toFixed(2) + '%',
+          csvEsc(buildRationale(r).join(' | ')),
+        ];
+        lines.push(row.join(','));
+      }
+    }
+    const [kwType] = vk.split('-');
+    downloadCsv(lines.join('\r\n'), `keyword-harvest-${vk}.csv`);
+  });
+});
+
+// Bulk download buttons (not-added views only — Amazon Ads upload format)
+['generic','branded','competitor'].forEach(type => {
+  const btn = document.getElementById(`bulk-dl-${type}-notadded`);
+  if (!btn) return;
+  btn.addEventListener('click', () => {
+    const rows = viewState[`${type}-notadded`].filtered;
+    if (!rows.length) { showError('No new keywords to export for this view.'); return; }
+    const MATCH_TYPES = ['Broad','Phrase','Exact'];
+    const header = ['Product','Entity','Operation','Campaign Name','Ad Group Name','State','Keyword Text','Match Type','Bid'].map(csvEsc).join(',');
+    const lines  = [header];
+    for (const r of rows) {
+      const ag0  = r.adGroups && r.adGroups[0];
+      const base = ag0 ? (ag0.avgCpc || ag0.bid) : 0.75;
+      for (const mt of MATCH_TYPES) {
+        lines.push([
+          csvEsc('Sponsored Products'),
+          csvEsc('Keyword'),
+          csvEsc('Create'),
+          csvEsc(ag0 ? ag0.campaign : ''),
+          csvEsc(ag0 ? ag0.adGroup  : ''),
+          csvEsc('enabled'),
+          csvEsc(r.searchTerm),
+          csvEsc(mt),
+          suggestedBid(r, base),
+        ].join(','));
+      }
+    }
+    downloadCsv(lines.join('\r\n'), `bulk-upload-${type}.csv`);
+  });
+});
+
+// =============================================================================
+// SEARCH WIRING
+// =============================================================================
+document.querySelectorAll('[data-search]').forEach(input => {
+  input.addEventListener('input', () => {
+    const vk = input.dataset.search;
+    viewState[vk].query = input.value;
+    viewState[vk].page  = 0;
+    recomputeFiltered(vk);
+    renderView(vk);
+    updateCounts();
+  });
+});
+
+// =============================================================================
+// FILE HANDLING — Brand Analytics CSV
 // =============================================================================
 browseLink.addEventListener('click', () => fileInput.click());
 dropZone.addEventListener('click', () => fileInput.click());
 dropZone.addEventListener('dragover', e => { e.preventDefault(); dropZone.classList.add('drag-over'); });
 dropZone.addEventListener('dragleave', () => dropZone.classList.remove('drag-over'));
-dropZone.addEventListener('drop', e => {
-  e.preventDefault();
-  dropZone.classList.remove('drag-over');
-  const f = e.dataTransfer.files[0];
-  if (f) handleFile(f);
-});
+dropZone.addEventListener('drop', e => { e.preventDefault(); dropZone.classList.remove('drag-over'); const f = e.dataTransfer.files[0]; if (f) handleFile(f); });
 fileInput.addEventListener('change', () => { if (fileInput.files[0]) handleFile(fileInput.files[0]); });
 
+function handleFile(file) {
+  fileReady = false; loadedFile = file; checkRunReady(); hideError();
+  fileNameEl.textContent = file.name;
+  fileMetaEl.textContent = formatBytes(file.size);
+  fileInfoEl.style.display  = 'block';
+  progressWrap.style.display = 'block';
+  parseSummary.style.display = 'none';
+  setProgress(0, 'Validating…');
+
+  if (!workerBlobUrl) {
+    workerBlobUrl = URL.createObjectURL(new Blob([WORKER_SRC], { type: 'application/javascript' }));
+  }
+  const w = new Worker(workerBlobUrl);
+  w.postMessage({ file, targetAsins: ['__PREFLIGHT__'], K: getK(), b: getB() });
+  w.onmessage = ev => {
+    const msg = ev.data;
+    if (msg.type === 'error') { showError(msg.message); progressWrap.style.display = 'none'; w.terminate(); }
+    else if (msg.type === 'done') {
+      detectedRange = msg.detectedRange;
+      setProgress(100, 'Done');
+      progressWrap.style.display = 'none';
+      parseSummary.textContent = `File validated (${formatBytes(file.size)})${detectedRange ? ' · week of ' + detectedRange : ''} — ready to search`;
+      parseSummary.style.display = 'block';
+      fileReady = true; checkRunReady(); w.terminate();
+    }
+  };
+  w.onerror = err => { showError('Worker error: ' + (err.message || 'Unknown')); progressWrap.style.display = 'none'; w.terminate(); };
+}
+
 // =============================================================================
-// BULK SHEET DROP / BROWSE
+// FILE HANDLING — Bulk sheet
 // =============================================================================
 bulkBrowseLink.addEventListener('click', () => bulkFileInput.click());
 bulkDropZone.addEventListener('click', () => bulkFileInput.click());
 bulkDropZone.addEventListener('dragover', e => { e.preventDefault(); bulkDropZone.classList.add('drag-over'); });
 bulkDropZone.addEventListener('dragleave', () => bulkDropZone.classList.remove('drag-over'));
-bulkDropZone.addEventListener('drop', e => {
-  e.preventDefault();
-  bulkDropZone.classList.remove('drag-over');
-  const f = e.dataTransfer.files[0];
-  if (f) handleBulkFile(f);
-});
+bulkDropZone.addEventListener('drop', e => { e.preventDefault(); bulkDropZone.classList.remove('drag-over'); const f = e.dataTransfer.files[0]; if (f) handleBulkFile(f); });
 bulkFileInput.addEventListener('change', () => { if (bulkFileInput.files[0]) handleBulkFile(bulkFileInput.files[0]); });
 
 async function handleBulkFile(file) {
   bulkData = null;
-  bulkDownloadBtn.disabled = true;
-  bulkNameEl.textContent  = file.name;
-  bulkMetaEl.textContent  = formatBytes(file.size);
+  bulkNameEl.textContent    = file.name;
+  bulkMetaEl.textContent    = formatBytes(file.size);
   bulkSummaryEl.textContent = 'Parsing…';
-  bulkInfoEl.style.display = 'block';
+  bulkInfoEl.style.display  = 'block';
   hideError();
-
   try {
     bulkData = await parseBulkSheet(file);
-    const s = bulkData.stats;
-    bulkSummaryEl.textContent =
-      `Found ${fmtNum(s.totalKw)} existing keywords · ${fmtNum(s.totalAGs)} ad groups · ${fmtNum(s.totalAsins)} ASINs with product ads`;
-    if (bulkData.warnings.length) {
-      bulkSummaryEl.textContent += ' — ⚠ ' + bulkData.warnings.join('; ');
-    }
-    // Re-annotate results if a lookup was already run
-    if (parsedResults.length) {
-      annotateBulk();
-      applyFilterAndSort();
-      buildTableHeader();  // adds Status column if not already there
-    }
+    const s  = bulkData.stats;
+    bulkSummaryEl.textContent = `${fmtNum(s.totalKw)} existing keywords · ${fmtNum(s.totalAGs)} ad groups · ${fmtNum(s.totalAsins)} ASINs with product ads`;
+    if (bulkData.warnings.length) bulkSummaryEl.textContent += ' — ⚠ ' + bulkData.warnings.join('; ');
+    if (parsedResults.length) { annotateResults(); renderAllViews(); }
   } catch (err) {
     showError('Bulk sheet error: ' + err.message);
     bulkInfoEl.style.display = 'none';
     bulkData = null;
   }
-}
-
-// ── Annotate parsedResults with bulk status ──────────────────────────────────
-// Adds .status ('new'|'added') and .adGroups array to every result record.
-function annotateBulk() {
-  if (!bulkData) {
-    for (const r of parsedResults) { r.status = null; r.adGroups = []; }
-    return;
-  }
-  for (const r of parsedResults) {
-    const kwKey = r.searchTerm.toLowerCase() + '|||';
-    // A term is "added" if it exists under ANY match type for this keyword
-    const isAdded = ['broad','phrase','exact'].some(mt =>
-      bulkData.existingKeys.has(kwKey + mt)
-    );
-    r.status = isAdded ? 'added' : 'new';
-
-    // Map ASIN → ad groups it's in
-    const agSet = bulkData.asinToAdGroups.get(r.asin) || new Set();
-    r.adGroups = [...agSet].map(key => {
-      const meta = bulkData.adGroupMeta.get(key) || { campaign: key, adGroup: '' };
-      const bid  = bulkData.adGroupBids.get(key) || 0.75;
-      return { ...meta, bid };
-    });
-  }
-  // Build action rows (Output 2) and enable download if new keywords exist
-  buildActionRows();
-  const hasNew = actionRows.length > 0;
-  bulkDownloadBtn.disabled = !hasNew;
-  if (parsedResults.length) renderActionTable();
-}
-
-function handleFile(file) {
-  fileReady = false;
-  loadedFile = file;
-  checkRunReady();
-  hideError();
-
-  fileNameEl.textContent = file.name;
-  fileMetaEl.textContent = formatBytes(file.size);
-  fileInfoEl.style.display = 'block';
-  progressWrap.style.display = 'block';
-  parseSummary.style.display = 'none';
-  setProgress(0, 'Starting…');
-
-  // Spin up worker
-  if (!workerBlobUrl) {
-    const blob = new Blob([WORKER_SRC], { type: 'application/javascript' });
-    workerBlobUrl = URL.createObjectURL(blob);
-  }
-
-  const w = new Worker(workerBlobUrl);
-
-  // Preflight: worker reads only the first 64 KB to validate columns + detect date range.
-  // At 2 GB this is ~instantaneous vs a full-file scan.
-  w.postMessage({ file, targetAsins: ['__PREFLIGHT__'], K: getK(), b: getB() });
-
-  w.onmessage = (ev) => {
-    const msg = ev.data;
-    if (msg.type === 'progress') {
-      // Preflight exits before Phase 2, so this should rarely fire
-      setProgress(msg.pct, 'Validating…');
-    } else if (msg.type === 'error') {
-      showError(msg.message);
-      progressWrap.style.display = 'none';
-      w.terminate();
-    } else if (msg.type === 'done') {
-      detectedRange = msg.detectedRange;
-      setProgress(100, 'Done');
-      progressWrap.style.display = 'none';
-      const rangeStr = detectedRange ? ` · week of ${detectedRange}` : '';
-      // At 2 GB we can't count rows cheaply — show file size instead
-      const sizeStr  = formatBytes(file.size);
-      parseSummary.textContent = `File validated (${sizeStr})${rangeStr} — ready to search`;
-      parseSummary.style.display = 'block';
-      fileReady = true;
-      checkRunReady();
-      w.terminate();
-    }
-  };
-
-  w.onerror = (err) => {
-    showError('Worker error: ' + (err.message || 'Unknown'));
-    progressWrap.style.display = 'none';
-    w.terminate();
-  };
 }
 
 // =============================================================================
@@ -1311,13 +1677,9 @@ runBtn.addEventListener('click', () => {
   const { valid } = parseAsins(asinInput.value);
   if (!valid.length) return;
   hideError();
-  multipleAsins = valid.length > 1;
-
   runBtn.disabled = true;
   runBtn.textContent = 'Starting…';
   resultsSection.style.display = 'none';
-
-  // Show the scan progress bar while the worker streams 2 GB
   fileInfoEl.style.display = 'block';
   progressWrap.style.display = 'block';
   parseSummary.style.display = 'none';
@@ -1326,8 +1688,7 @@ runBtn.addEventListener('click', () => {
 
   const w = new Worker(workerBlobUrl);
   w.postMessage({ file: loadedFile, targetAsins: valid, K: getK(), b: getB() });
-
-  w.onmessage = (ev) => {
+  w.onmessage = ev => {
     const msg = ev.data;
     if (msg.type === 'progress') {
       const elapsed = ((Date.now() - scanStart) / 1000).toFixed(0);
@@ -1336,532 +1697,74 @@ runBtn.addEventListener('click', () => {
     } else if (msg.type === 'error') {
       showError(msg.message);
       progressWrap.style.display = 'none';
-      runBtn.disabled = false;
-      runBtn.textContent = 'Run Reverse-ASIN Lookup';
-      w.terminate();
+      runBtn.disabled = false; runBtn.textContent = 'Run Reverse-ASIN Lookup'; w.terminate();
     } else if (msg.type === 'done') {
-      const elapsed = ((Date.now() - scanStart) / 1000).toFixed(1);
       progressWrap.style.display = 'none';
-      parseSummary.textContent = `Scanned ${fmtNum(msg.totalRows)} rows · found ${fmtNum(msg.results.length)} matches · ${elapsed}s`;
+      parseSummary.textContent = `Scanned ${fmtNum(msg.totalRows)} rows · found ${fmtNum(msg.results.length)} matches · ${((Date.now()-scanStart)/1000).toFixed(1)}s`;
       parseSummary.style.display = 'block';
       parsedResults = msg.results;
-      // Annotate with bulk data if already loaded
-      annotateBulk();
-      runBtn.disabled = false;
-      runBtn.textContent = 'Run Reverse-ASIN Lookup';
-      checkRunReady();
-      renderResults();
+      annotateResults();
+      runBtn.disabled = false; runBtn.textContent = 'Run Reverse-ASIN Lookup'; checkRunReady();
+      renderAllViews();
       w.terminate();
     }
   };
-
-  w.onerror = (err) => {
-    showError('Worker error: ' + (err.message || 'Unknown'));
+  w.onerror = err => {
+    showError('Worker error: ' + (err.message||'Unknown'));
     progressWrap.style.display = 'none';
-    runBtn.disabled = false;
-    runBtn.textContent = 'Run Reverse-ASIN Lookup';
-    w.terminate();
+    runBtn.disabled = false; runBtn.textContent = 'Run Reverse-ASIN Lookup'; w.terminate();
   };
 });
 
 // =============================================================================
-// RESULTS RENDERING
+// ASIN INPUT
 // =============================================================================
-function renderResults() {
-  // Build columns list
-  buildTableHeader();
-  applyFilterAndSort();
-  resultsSection.style.display = 'block';
-  window.scrollTo({ top: document.getElementById('results-section').offsetTop - 12, behavior: 'smooth' });
-}
+const ASIN_RE = /^B0[A-Z0-9]{8}$/i;
 
-function buildTableHeader() {
-  const cols = getColumns();
-  resultsThead.innerHTML = '';
-  const tr = document.createElement('tr');
-  for (const col of cols) {
-    const th = document.createElement('th');
-    th.innerHTML = col.label + '<span class="sort-arrow"></span>';
-    th.dataset.col = col.key;
-    th.addEventListener('click', () => {
-      if (sortCol === col.key) sortDir = sortDir === 'asc' ? 'desc' : 'asc';
-      else { sortCol = col.key; sortDir = col.key === 'sfr' ? 'asc' : 'desc'; }
-      applyFilterAndSort();
-    });
-    tr.appendChild(th);
+function parseAsins(raw) {
+  const tokens = raw.split(/[\s,;\n]+/).map(t => t.trim()).filter(Boolean);
+  const valid = [], invalid = [], seen = new Set();
+  for (const t of tokens) {
+    if (ASIN_RE.test(t)) { const u = t.toUpperCase(); if (!seen.has(u)) { valid.push(u); seen.add(u); } }
+    else invalid.push(t);
   }
-  resultsThead.appendChild(tr);
+  return { valid, invalid };
 }
 
-function getColumns() {
-  return [
-    { key: 'asin',            label: 'ASIN',                   numeric: false },
-    { key: 'searchTerm',      label: 'Keyword',                numeric: false },
-    { key: 'sfr',             label: 'SFR',                    numeric: true  },
-    { key: 'estVolume',       label: 'Est. monthly volume ⓘ',  numeric: true  },
-    { key: 'clickPosition',   label: 'Click position',         numeric: true  },
-    { key: 'clickShare',      label: 'Click share %',          numeric: true  },
-    { key: 'conversionShare', label: 'Conv. share %',          numeric: true  },
-    { key: 'status',          label: 'Status',                 numeric: false },
-  ];
+function renderAsinTags() {
+  const { valid, invalid } = parseAsins(asinInput.value);
+  asinTagsEl.innerHTML = '';
+  for (const a of valid)   { const sp = document.createElement('span'); sp.className = 'asin-tag valid';   sp.textContent = a;      asinTagsEl.appendChild(sp); }
+  for (const a of invalid) { const sp = document.createElement('span'); sp.className = 'asin-tag invalid'; sp.textContent = a+' ✗'; sp.title = 'Not a valid ASIN'; asinTagsEl.appendChild(sp); }
+  checkRunReady();
 }
 
-function applyFilterAndSort() {
-  const query = filterInput.value.trim().toLowerCase();
+asinInput.addEventListener('input', renderAsinTags);
 
-  let data = [...parsedResults];
-
-  // Text filter
-  if (query) {
-    data = data.filter(r =>
-      r.searchTerm.toLowerCase().includes(query) ||
-      r.asin.toLowerCase().includes(query)
-    );
-  }
-
-  // Status filter (only meaningful when bulk sheet loaded)
-  if (bulkData && statusFilter !== 'all') {
-    data = data.filter(r => r.status === statusFilter);
-  }
-
-  // Sort
-  data.sort((a, b) => {
-    let av, bv;
-    if (sortCol === 'estVolume') {
-      av = a.estVolumeHigh; bv = b.estVolumeHigh;
-    } else {
-      av = a[sortCol]; bv = b[sortCol];
-    }
-    if (typeof av === 'string') av = av.toLowerCase();
-    if (typeof bv === 'string') bv = bv.toLowerCase();
-    if (av < bv) return sortDir === 'asc' ? -1 : 1;
-    if (av > bv) return sortDir === 'asc' ? 1 : -1;
-    return 0;
-  });
-
-  filteredResults = data;
-  currentPage = 0;
-  updateSortArrows();
-  renderSummaryStrip();
-  renderTablePage();
-}
-
-function updateSortArrows() {
-  const ths = resultsThead.querySelectorAll('th');
-  for (const th of ths) {
-    const arrow = th.querySelector('.sort-arrow');
-    if (th.dataset.col === sortCol) {
-      arrow.textContent = sortDir === 'asc' ? ' ▲' : ' ▼';
-    } else {
-      arrow.textContent = '';
-    }
-  }
-}
-
-function renderSummaryStrip() {
-  const total = filteredResults.length;
-  if (total === 0) { summaryStrip.innerHTML = ''; return; }
-
-  const bestSFR  = filteredResults.reduce((m, r) => r.sfr < m ? r.sfr : m, Infinity);
-  const pos1     = filteredResults.filter(r => r.clickPosition === 1).length;
-  const oppCount = filteredResults.filter(r => r.conversionShare > r.clickShare).length;
-
-  let bulkStats = '';
-  if (bulkData) {
-    const newCount   = parsedResults.filter(r => r.status === 'new').length;
-    const addedCount = parsedResults.filter(r => r.status === 'added').length;
-    bulkStats = `
-      <div class="summary-stat new-badge"><strong>${fmtNum(newCount)}</strong><small>New keywords to add</small></div>
-      <div class="summary-stat"><strong>${fmtNum(addedCount)}</strong><small>Already in campaigns</small></div>
-    `;
-  }
-
-  summaryStrip.innerHTML = `
-    <div class="summary-stat"><strong>${fmtNum(total)}</strong><small>Keywords found</small></div>
-    <div class="summary-stat"><strong>${fmtNum(bestSFR)}</strong><small>Best SFR (lowest)</small></div>
-    <div class="summary-stat"><strong>${fmtNum(pos1)}</strong><small>#1 click position terms</small></div>
-    <div class="summary-stat opp-badge"><strong>${fmtNum(oppCount)}</strong><small>Ranking opportunities (CVR &gt; CTR)</small></div>
-    ${bulkStats}
-  `;
-}
-
-function renderTablePage() {
-  const start = 0;
-  const end   = (currentPage + 1) * PAGE_SIZE;
-  const slice = filteredResults.slice(start, end);
-
-  resultsTbody.innerHTML = '';
-
-  if (slice.length === 0) {
-    const tr = document.createElement('tr');
-    const td = document.createElement('td');
-    td.colSpan = getColumns().length;
-    td.className = 'empty-state';
-    if (parsedResults.length === 0) {
-      td.textContent = 'ASIN not found in top 3 clicked ASINs for any search term in this file.';
-    } else {
-      td.textContent = 'No results match your filter.';
-    }
-    tr.appendChild(td);
-    resultsTbody.appendChild(tr);
-    showMoreBtn.style.display = 'none';
-    return;
-  }
-
-  const frag = document.createDocumentFragment();
-  for (const r of slice) {
-    frag.appendChild(buildResultRow(r));
-  }
-  resultsTbody.appendChild(frag);
-
-  if (end < filteredResults.length) {
-    const remaining = filteredResults.length - end;
-    showMoreBtn.textContent = `Show more (${fmtNum(Math.min(PAGE_SIZE, remaining))} of ${fmtNum(remaining)} remaining)`;
-    showMoreBtn.style.display = 'block';
-  } else {
-    showMoreBtn.style.display = 'none';
-  }
-}
-
-showMoreBtn.addEventListener('click', () => {
-  currentPage++;
-  const end = (currentPage + 1) * PAGE_SIZE;
-  const slice = filteredResults.slice(0, end);
-  // Append only new rows
-  const frag = document.createDocumentFragment();
-  const prevEnd = currentPage * PAGE_SIZE;
-  const newSlice = filteredResults.slice(prevEnd, end);
-  for (const r of newSlice) frag.appendChild(buildResultRow(r));
-  resultsTbody.appendChild(frag);
-
-  if (end < filteredResults.length) {
-    const remaining = filteredResults.length - end;
-    showMoreBtn.textContent = `Show more (${fmtNum(Math.min(PAGE_SIZE, remaining))} of ${fmtNum(remaining)} remaining)`;
-  } else {
-    showMoreBtn.style.display = 'none';
-  }
-});
-
-function buildResultRow(r) {
-  const isOpp = r.conversionShare > r.clickShare;
-  const tr    = document.createElement('tr');
-  if (isOpp) tr.className = 'opp-row';
-  tr.appendChild(tdMono(r.asin));
-  tr.appendChild(tdText(r.searchTerm, 'keyword-cell'));
-  tr.appendChild(tdNum(fmtNum(r.sfr)));
-  tr.appendChild(tdNum(fmtVolume(r.estVolumeLow, r.estVolumeHigh)));
-  tr.appendChild(tdBadge(r.clickPosition));
-  tr.appendChild(tdNum(r.clickShare.toFixed(1) + '%'));
-  tr.appendChild(tdNum(r.conversionShare.toFixed(1) + '%'));
-  tr.appendChild(tdStatus(r.status));
-  return tr;
-}
-
-// Filter + status toggle listeners
-filterInput.addEventListener('input', () => applyFilterAndSort());
-
-statusToggle.querySelectorAll('button').forEach(btn => {
-  btn.addEventListener('click', () => {
-    statusToggle.querySelectorAll('button').forEach(b => b.classList.remove('active'));
-    btn.classList.add('active');
-    statusFilter = btn.dataset.val;
-    applyFilterAndSort();
-  });
-});
-
-// =============================================================================
-// TD HELPERS
-// =============================================================================
-function tdText(val, cls) {
-  const td = document.createElement('td');
-  if (cls) td.className = cls;
-  td.textContent = val;
-  return td;
-}
-function tdMono(val) {
-  const td = document.createElement('td');
-  td.style.fontFamily = 'monospace';
-  td.style.fontSize   = '12px';
-  td.textContent = val;
-  return td;
-}
-function tdNum(val) {
-  const td = document.createElement('td');
-  td.className = 'num-cell';
-  td.textContent = val;
-  return td;
-}
-function tdBadge(pos) {
-  const td = document.createElement('td');
-  const span = document.createElement('span');
-  span.className = `pos-badge pos-${pos}`;
-  span.textContent = '#' + pos;
-  td.appendChild(span);
-  return td;
-}
-function tdStatus(status) {
-  const td   = document.createElement('td');
-  if (!status) { td.textContent = '—'; return td; }
-  const span = document.createElement('span');
-  span.className = 'status-badge ' + (status === 'new' ? 'status-new' : 'status-dupe');
-  span.textContent = status === 'new' ? '+ New' : '✓ Added';
-  td.appendChild(span);
-  return td;
+function checkRunReady() {
+  runBtn.disabled = !(fileReady && parseAsins(asinInput.value).valid.length > 0);
 }
 
 // =============================================================================
-// RATIONALE ENGINE
-// Deterministic rules — no AI. Returns array of reason strings.
+// UTILITY
 // =============================================================================
-function buildRationale(r) {
-  const reasons = [];
-  if (r.sfr <= 1000)                            reasons.push('Top 1K search term');
-  else if (r.sfr <= 10000)                      reasons.push('High-volume term (SFR < 10K)');
-  if (r.clickPosition === 1)                    reasons.push('#1 clicked ASIN — top relevance');
-  if (r.conversionShare > r.clickShare)         reasons.push('CVR > CTR — converts better than it clicks');
-  if (r.clickShare >= 20)                       reasons.push(`Dominates clicks (${r.clickShare.toFixed(0)}% share)`);
-  else if (r.clickShare >= 10)                  reasons.push(`Strong click share (${r.clickShare.toFixed(0)}%)`);
-  if (r.conversionShare >= 20)                  reasons.push(`High conv. share (${r.conversionShare.toFixed(0)}%)`);
-  if (reasons.length === 0)                     reasons.push('Appears in top 3 clicked ASINs');
-  return reasons;
+function setProgress(pct, label) { progressFill.style.width = pct + '%'; progressText.textContent = label; }
+
+function showError(msg) {
+  errorBanner.style.display = 'block';
+  const lines = msg.split('\n').filter(Boolean);
+  errorBanner.innerHTML = lines.length === 1
+    ? '⚠️ ' + escHtml(msg)
+    : '⚠️ ' + escHtml(lines[0]) + '<ul>' + lines.slice(1).map(l => '<li>' + escHtml(l) + '</li>').join('') + '</ul>';
 }
-
-// Suggested bid: start from ad group default, adjust by signal strength
-function suggestedBid(r, agBid) {
-  const base = agBid || 0.75;
-  // Premium for top signals
-  let mult = 1.0;
-  if (r.sfr <= 1000)                  mult += 0.20;
-  if (r.clickPosition === 1)          mult += 0.10;
-  if (r.conversionShare > r.clickShare) mult += 0.10;
-  return Math.min(base * mult, base * 1.5).toFixed(2);  // cap at 50% above default
-}
-
-// =============================================================================
-// BUILD ACTION ROWS — called inside annotateBulk after bulk data available
-// =============================================================================
-function buildActionRows() {
-  actionRows = [];
-  if (!bulkData) return;
-
-  const MATCH_TYPES = ['Broad', 'Phrase', 'Exact'];
-  const seen = new Set();
-
-  for (const r of parsedResults) {
-    if (r.status !== 'new') continue;
-
-    const adGroups = (r.adGroups && r.adGroups.length)
-      ? r.adGroups
-      : [{ campaign: '', adGroup: '', bid: 0.75 }];
-
-    for (const ag of adGroups) {
-      for (const mt of MATCH_TYPES) {
-        const existKey  = r.searchTerm.toLowerCase() + '|||' + mt.toLowerCase();
-        if (bulkData.existingKeys.has(existKey)) continue;
-        const dedupeKey = ag.campaign + '|' + ag.adGroup + '|' + r.searchTerm + '|' + mt;
-        if (seen.has(dedupeKey)) continue;
-        seen.add(dedupeKey);
-
-        actionRows.push({
-          campaign:   ag.campaign || '(not mapped)',
-          adGroup:    ag.adGroup  || '(not mapped)',
-          asin:       r.asin,
-          keyword:    r.searchTerm,
-          matchType:  mt,
-          bid:        suggestedBid(r, ag.bid),
-          rationale:  buildRationale(r),
-          // carry signal data for sort
-          sfr:        r.sfr,
-          clickPosition: r.clickPosition,
-          conversionShare: r.conversionShare,
-          clickShare: r.clickShare,
-        });
-      }
-    }
-  }
-  // Default sort: SFR ascending
-  actionRows.sort((a, b) => a.sfr - b.sfr);
-}
-
-// =============================================================================
-// OUTPUT 2 — RENDER ACTION TABLE
-// =============================================================================
-const ACTION_COLS = [
-  { label: 'Campaign',     key: 'campaign'   },
-  { label: 'Ad Group',     key: 'adGroup'    },
-  { label: 'ASIN',         key: 'asin'       },
-  { label: 'Keyword',      key: 'keyword'    },
-  { label: 'Match Type',   key: 'matchType'  },
-  { label: 'Bid ($)',      key: 'bid'        },
-  { label: 'Rationale',    key: 'rationale'  },
-];
-
-function renderActionTable() {
-  // Build header once
-  actionThead.innerHTML = '';
-  const tr = document.createElement('tr');
-  for (const col of ACTION_COLS) {
-    const th = document.createElement('th');
-    th.textContent = col.label;
-    tr.appendChild(th);
-  }
-  actionThead.appendChild(tr);
-
-  applyActionFilter();
-  actionSection.style.display = 'block';
-}
-
-function applyActionFilter() {
-  const q = actionFilter.value.trim().toLowerCase();
-  filteredActions = q
-    ? actionRows.filter(r =>
-        r.keyword.toLowerCase().includes(q) ||
-        r.campaign.toLowerCase().includes(q) ||
-        r.adGroup.toLowerCase().includes(q) ||
-        r.asin.toLowerCase().includes(q))
-    : [...actionRows];
-  actionPage = 0;
-  renderActionPage();
-}
-
-function renderActionPage() {
-  actionTbody.innerHTML = '';
-  const end   = (actionPage + 1) * PAGE_SIZE;
-  const slice = filteredActions.slice(0, end);
-
-  if (!slice.length) {
-    const tr = document.createElement('tr');
-    const td = document.createElement('td');
-    td.colSpan = ACTION_COLS.length;
-    td.className = 'empty-state';
-    td.textContent = actionRows.length
-      ? 'No rows match your filter.'
-      : 'No new keywords to add — all suggestions are already in your campaigns.';
-    tr.appendChild(td); actionTbody.appendChild(tr);
-    showMoreActionBtn.style.display = 'none';
-    return;
-  }
-
-  const frag = document.createDocumentFragment();
-  for (const r of slice) frag.appendChild(buildActionRow(r));
-  actionTbody.appendChild(frag);
-
-  if (end < filteredActions.length) {
-    const rem = filteredActions.length - end;
-    showMoreActionBtn.textContent = `Show more (${fmtNum(Math.min(PAGE_SIZE, rem))} of ${fmtNum(rem)} remaining)`;
-    showMoreActionBtn.style.display = 'block';
-  } else {
-    showMoreActionBtn.style.display = 'none';
-  }
-}
-
-function buildActionRow(r) {
-  const tr = document.createElement('tr');
-  tr.appendChild(tdText(r.campaign));
-  tr.appendChild(tdText(r.adGroup));
-  tr.appendChild(tdMono(r.asin));
-  tr.appendChild(tdText(r.keyword, 'keyword-cell'));
-  // Match type badge
-  const mtTd   = document.createElement('td');
-  const mtSpan = document.createElement('span');
-  mtSpan.className = 'status-badge status-new';
-  mtSpan.textContent = r.matchType;
-  mtTd.appendChild(mtSpan); tr.appendChild(mtTd);
-  // Bid
-  tr.appendChild(tdNum('$' + r.bid));
-  // Rationale
-  const rtTd = document.createElement('td');
-  rtTd.className = 'rationale';
-  rtTd.innerHTML = r.rationale.map(s => `<strong>·</strong> ${escHtml(s)}`).join('<br>');
-  tr.appendChild(rtTd);
-  return tr;
-}
-
-showMoreActionBtn.addEventListener('click', () => {
-  actionPage++;
-  const end      = (actionPage + 1) * PAGE_SIZE;
-  const prevEnd  = actionPage * PAGE_SIZE;
-  const newSlice = filteredActions.slice(prevEnd, end);
-  const frag     = document.createDocumentFragment();
-  for (const r of newSlice) frag.appendChild(buildActionRow(r));
-  actionTbody.appendChild(frag);
-  if (end < filteredActions.length) {
-    const rem = filteredActions.length - end;
-    showMoreActionBtn.textContent = `Show more (${fmtNum(Math.min(PAGE_SIZE, rem))} of ${fmtNum(rem)} remaining)`;
-  } else {
-    showMoreActionBtn.style.display = 'none';
-  }
-});
-
-actionFilter.addEventListener('input', () => applyActionFilter());
-
-// =============================================================================
-// EXPORT CSV — keyword suggestions (current filter/sort)
-// =============================================================================
-exportBtn.addEventListener('click', () => {
-  const header = 'ASIN,Keyword,SFR,Est. monthly volume,Click position,Click share %,Conv. share %,Status';
-  const rowLines = filteredResults.map(r => [
-    csvEsc(r.asin),
-    csvEsc(r.searchTerm),
-    r.sfr,
-    `"${fmtK(r.estVolumeLow)}–${fmtK(r.estVolumeHigh)}"`,
-    r.clickPosition,
-    r.clickShare.toFixed(2) + '%',
-    r.conversionShare.toFixed(2) + '%',
-    r.status || '',
-  ].join(','));
-  downloadCsv([header, ...rowLines].join('\r\n'), 'keyword-suggestions.csv');
-});
-
-// =============================================================================
-// EXPORT CSV — action plan
-// =============================================================================
-exportActionBtn.addEventListener('click', () => {
-  const header = 'Campaign,Ad Group,ASIN,Keyword,Match Type,Bid,Rationale';
-  const lines = filteredActions.map(r => [
-    csvEsc(r.campaign),
-    csvEsc(r.adGroup),
-    csvEsc(r.asin),
-    csvEsc(r.keyword),
-    csvEsc(r.matchType),
-    r.bid,
-    csvEsc(r.rationale.join(' | ')),
-  ].join(','));
-  downloadCsv([header, ...lines].join('\r\n'), 'campaign-action-plan.csv');
-});
-
-// =============================================================================
-// BULK DOWNLOAD — Amazon Ads bulk upload sheet (from action rows)
-// =============================================================================
-bulkDownloadBtn.addEventListener('click', () => {
-  if (!actionRows.length) {
-    showError('No new keywords to download — all suggestions are already in your campaigns.');
-    return;
-  }
-
-  // Use currently filtered action rows so filter/search applies to bulk download too
-  const rowsToExport = filteredActions.length ? filteredActions : actionRows;
-
-  const header = [
-    'Product','Entity','Operation',
-    'Campaign Name','Ad Group Name',
-    'State','Keyword Text','Match Type','Bid',
-  ].map(csvEsc).join(',');
-
-  const lines = rowsToExport.map(r => [
-    csvEsc('Sponsored Products'),
-    csvEsc('Keyword'),
-    csvEsc('Create'),
-    csvEsc(r.campaign),
-    csvEsc(r.adGroup),
-    csvEsc('enabled'),
-    csvEsc(r.keyword),
-    csvEsc(r.matchType),
-    r.bid,
-  ].join(','));
-
-  downloadCsv([header, ...lines].join('\r\n'), 'bulk-keyword-upload.csv');
-});
+function hideError() { errorBanner.style.display = 'none'; }
+function escHtml(s) { return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
+function formatBytes(b) { if(b>1_000_000) return (b/1_048_576).toFixed(1)+' MB'; if(b>1000) return (b/1024).toFixed(0)+' KB'; return b+' B'; }
+function fmtNum(n) { if(n===undefined||n===null) return ''; return Number(n).toLocaleString('en-US'); }
+function fmtK(n) { if(n>=1_000_000) return (n/1_000_000).toFixed(1)+'M'; if(n>=1_000) return Math.round(n/1_000)+'K'; return String(n); }
+function fmtVolume(lo, hi) { return fmtK(lo) + '–' + fmtK(hi); }
+function getK() { return parseFloat(document.getElementById('cal-k').value) || K_DEFAULT; }
+function getB() { return parseFloat(document.getElementById('cal-b').value) || B_DEFAULT; }
 
 function downloadCsv(csv, filename) {
   const blob = new Blob(['\uFEFF' + csv], { type: 'text/csv;charset=utf-8;' });
@@ -1873,60 +1776,8 @@ function downloadCsv(csv, filename) {
 
 function csvEsc(v) {
   v = String(v);
-  if (v.includes(',') || v.includes('"') || v.includes('\n')) return '"' + v.replace(/"/g, '""') + '"';
+  if (v.includes(',') || v.includes('"') || v.includes('\n')) return '"' + v.replace(/"/g,'""') + '"';
   return v;
-}
-
-// =============================================================================
-// CALIBRATION
-// =============================================================================
-function getK() { return parseFloat(document.getElementById('cal-k').value) || K_DEFAULT; }
-function getB() { return parseFloat(document.getElementById('cal-b').value) || B_DEFAULT; }
-
-// =============================================================================
-// UTILITY
-// =============================================================================
-function setProgress(pct, label) {
-  progressFill.style.width = pct + '%';
-  progressText.textContent = label;
-}
-
-function showError(msg) {
-  errorBanner.style.display = 'block';
-  // Format newlines and lists
-  const lines = msg.split('\n').filter(Boolean);
-  if (lines.length === 1) {
-    errorBanner.innerHTML = '⚠️ ' + escHtml(msg);
-  } else {
-    errorBanner.innerHTML = '⚠️ ' + escHtml(lines[0]) + '<ul>' + lines.slice(1).map(l => '<li>' + escHtml(l) + '</li>').join('') + '</ul>';
-  }
-}
-
-function hideError() { errorBanner.style.display = 'none'; }
-
-function escHtml(s) {
-  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
-}
-
-function formatBytes(b) {
-  if (b > 1_000_000) return (b/1_048_576).toFixed(1) + ' MB';
-  if (b > 1000)      return (b/1024).toFixed(0) + ' KB';
-  return b + ' B';
-}
-
-function fmtNum(n) {
-  if (n === undefined || n === null) return '';
-  return n.toLocaleString('en-US');
-}
-
-function fmtK(n) {
-  if (n >= 1_000_000) return (n/1_000_000).toFixed(1) + 'M';
-  if (n >= 1_000)     return Math.round(n/1_000) + 'K';
-  return String(n);
-}
-
-function fmtVolume(lo, hi) {
-  return fmtK(lo) + '–' + fmtK(hi);
 }
 
 // Init
