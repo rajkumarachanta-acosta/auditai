@@ -124,12 +124,28 @@
   #run-btn:disabled { opacity: 0.45; cursor: not-allowed; }
   #run-btn:not(:disabled):hover { opacity: 0.88; }
 
+  /* Section divider */
+  .output-section { margin-top: 36px; }
+  .output-heading {
+    font-size: 14px; font-weight: 700; margin-bottom: 12px;
+    padding-bottom: 8px; border-bottom: 2px solid var(--border);
+    display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 8px;
+  }
+  .output-heading span { color: var(--muted); font-weight: 400; font-size: 12px; }
+
+  /* Rationale pill */
+  .rationale { font-size: 11px; color: var(--muted); line-height: 1.4; }
+  .rationale strong { color: var(--accent); }
+
   /* Bulk download button */
-  #bulk-download-btn {
+  .btn-green {
     padding: 7px 16px; background: #16a34a; border: none;
     border-radius: 5px; font-size: 13px; font-weight: 600;
     cursor: pointer; color: #fff; white-space: nowrap;
   }
+  .btn-green:disabled { opacity: 0.4; cursor: not-allowed; }
+  .btn-green:not(:disabled):hover { opacity: 0.88; }
+  #bulk-download-btn { padding: 7px 16px; background: #16a34a; border: none; border-radius: 5px; font-size: 13px; font-weight: 600; cursor: pointer; color: #fff; white-space: nowrap; }
   #bulk-download-btn:disabled { opacity: 0.4; cursor: not-allowed; }
   #bulk-download-btn:not(:disabled):hover { opacity: 0.88; }
 
@@ -287,23 +303,44 @@
   <!-- RESULTS -->
   <div id="results-section">
     <div class="summary-strip" id="summary-strip"></div>
-    <div class="table-toolbar">
-      <input type="text" id="filter-input" placeholder="Filter keywords…">
-      <div class="filter-toggle" id="status-toggle">
-        <button class="active" data-val="all">All</button>
-        <button data-val="new">New only</button>
-        <button data-val="added">Already added</button>
+
+    <!-- OUTPUT 1: Keyword Suggestions -->
+    <div class="output-section">
+      <div class="output-heading">
+        Output 1 — Keyword suggestions
+        <span>All search terms where your ASIN appears in top 3 clicked results</span>
+        <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
+          <div class="filter-toggle" id="status-toggle">
+            <button class="active" data-val="all">All</button>
+            <button data-val="new">New only</button>
+            <button data-val="added">Already added</button>
+          </div>
+          <input type="text" id="filter-input" placeholder="Filter keywords…" style="padding:6px 10px;border:1px solid var(--border);border-radius:5px;font-size:13px;background:var(--bg);color:var(--text);min-width:160px;">
+          <button id="export-btn">⬇ Export CSV</button>
+        </div>
       </div>
-      <button id="export-btn">⬇ Export CSV</button>
-      <button id="bulk-download-btn" disabled>⬇ Download bulk upload sheet</button>
+      <div class="table-wrap">
+        <table><thead id="results-thead"></thead><tbody id="results-tbody"></tbody></table>
+      </div>
+      <button id="show-more-btn" style="display:none"></button>
     </div>
-    <div class="table-wrap">
-      <table id="results-table">
-        <thead id="results-thead"></thead>
-        <tbody id="results-tbody"></tbody>
-      </table>
+
+    <!-- OUTPUT 2: Campaign Action Plan (only when bulk sheet loaded) -->
+    <div class="output-section" id="action-section" style="display:none">
+      <div class="output-heading">
+        Output 2 — Campaign action plan
+        <span>New keywords mapped to your campaigns, with bid and rationale</span>
+        <div style="display:flex;gap:8px;">
+          <input type="text" id="action-filter" placeholder="Filter…" style="padding:6px 10px;border:1px solid var(--border);border-radius:5px;font-size:13px;background:var(--bg);color:var(--text);min-width:140px;">
+          <button id="export-action-btn">⬇ Export CSV</button>
+          <button id="bulk-download-btn" class="btn-green" disabled>⬇ Download bulk upload sheet</button>
+        </div>
+      </div>
+      <div class="table-wrap">
+        <table><thead id="action-thead"></thead><tbody id="action-tbody"></tbody></table>
+      </div>
+      <button id="show-more-action-btn" style="display:none"></button>
     </div>
-    <button id="show-more-btn" style="display:none"></button>
   </div>
 
 </div><!-- /container -->
@@ -621,14 +658,19 @@ function parsePercent(val) {
 // =============================================================================
 // MAIN THREAD GLOBALS
 // =============================================================================
-let parsedResults   = [];
-let filteredResults = [];
-let currentPage     = 0;
-let sortCol         = 'sfr';
-let sortDir         = 'asc';
-let multipleAsins   = false;
-let workerBlobUrl   = null;
-let statusFilter    = 'all';  // 'all' | 'new' | 'added'
+let parsedResults    = [];
+let filteredResults  = [];
+let currentPage      = 0;
+let sortCol          = 'sfr';
+let sortDir          = 'asc';
+let multipleAsins    = false;
+let workerBlobUrl    = null;
+let statusFilter     = 'all';  // 'all' | 'new' | 'added'
+
+// Output 2: action plan rows (built from parsedResults after annotateBulk)
+let actionRows       = [];        // flat: one per (result × adGroup × matchType)
+let filteredActions  = [];
+let actionPage       = 0;
 
 // =============================================================================
 // DOM REFS
@@ -659,10 +701,16 @@ const summaryStrip     = document.getElementById('summary-strip');
 const filterInput      = document.getElementById('filter-input');
 const statusToggle     = document.getElementById('status-toggle');
 const exportBtn        = document.getElementById('export-btn');
-const bulkDownloadBtn  = document.getElementById('bulk-download-btn');
 const resultsTbody     = document.getElementById('results-tbody');
 const resultsThead     = document.getElementById('results-thead');
 const showMoreBtn      = document.getElementById('show-more-btn');
+const actionSection    = document.getElementById('action-section');
+const actionThead      = document.getElementById('action-thead');
+const actionTbody      = document.getElementById('action-tbody');
+const actionFilter     = document.getElementById('action-filter');
+const exportActionBtn  = document.getElementById('export-action-btn');
+const bulkDownloadBtn  = document.getElementById('bulk-download-btn');
+const showMoreActionBtn= document.getElementById('show-more-action-btn');
 
 // =============================================================================
 // STATE
@@ -1160,6 +1208,7 @@ async function handleBulkFile(file) {
     if (parsedResults.length) {
       annotateBulk();
       applyFilterAndSort();
+      buildTableHeader();  // adds Status column if not already there
     }
   } catch (err) {
     showError('Bulk sheet error: ' + err.message);
@@ -1191,9 +1240,11 @@ function annotateBulk() {
       return { ...meta, bid };
     });
   }
-  // Enable download button if there are any new keywords
-  const hasNew = parsedResults.some(r => r.status === 'new');
+  // Build action rows (Output 2) and enable download if new keywords exist
+  buildActionRows();
+  const hasNew = actionRows.length > 0;
   bulkDownloadBtn.disabled = !hasNew;
+  if (parsedResults.length) renderActionTable();
 }
 
 function handleFile(file) {
@@ -1343,17 +1394,16 @@ function buildTableHeader() {
 }
 
 function getColumns() {
-  const cols = [
-    { key: 'searchTerm',       label: 'Keyword',                numeric: false },
-    { key: 'sfr',              label: 'SFR',                    numeric: true  },
-    { key: 'estVolume',        label: 'Est. monthly volume ⓘ',  numeric: true  },
-    { key: 'clickPosition',    label: 'Click position',         numeric: true  },
-    { key: 'clickShare',       label: 'Click share %',          numeric: true  },
-    { key: 'conversionShare',  label: 'Conv. share %',          numeric: true  },
+  return [
+    { key: 'asin',            label: 'ASIN',                   numeric: false },
+    { key: 'searchTerm',      label: 'Keyword',                numeric: false },
+    { key: 'sfr',             label: 'SFR',                    numeric: true  },
+    { key: 'estVolume',       label: 'Est. monthly volume ⓘ',  numeric: true  },
+    { key: 'clickPosition',   label: 'Click position',         numeric: true  },
+    { key: 'clickShare',      label: 'Click share %',          numeric: true  },
+    { key: 'conversionShare', label: 'Conv. share %',          numeric: true  },
+    { key: 'status',          label: 'Status',                 numeric: false },
   ];
-  if (multipleAsins) cols.push({ key: 'asin', label: 'Target ASIN', numeric: false });
-  if (bulkData)      cols.push({ key: 'status', label: 'Status', numeric: false });
-  return cols;
 }
 
 function applyFilterAndSort() {
@@ -1460,20 +1510,7 @@ function renderTablePage() {
 
   const frag = document.createDocumentFragment();
   for (const r of slice) {
-    const isOpp = r.conversionShare > r.clickShare;
-    const tr    = document.createElement('tr');
-    if (isOpp) tr.className = 'opp-row';
-
-    tr.appendChild(tdText(r.searchTerm, 'keyword-cell'));
-    tr.appendChild(tdNum(fmtNum(r.sfr)));
-    tr.appendChild(tdNum(fmtVolume(r.estVolumeLow, r.estVolumeHigh)));
-    tr.appendChild(tdBadge(r.clickPosition));
-    tr.appendChild(tdNum(r.clickShare.toFixed(1) + '%'));
-    tr.appendChild(tdNum(r.conversionShare.toFixed(1) + '%'));
-    if (multipleAsins) tr.appendChild(tdText(r.asin));
-    if (bulkData)      tr.appendChild(tdStatus(r.status));
-
-    frag.appendChild(tr);
+    frag.appendChild(buildResultRow(r));
   }
   resultsTbody.appendChild(frag);
 
@@ -1494,20 +1531,7 @@ showMoreBtn.addEventListener('click', () => {
   const frag = document.createDocumentFragment();
   const prevEnd = currentPage * PAGE_SIZE;
   const newSlice = filteredResults.slice(prevEnd, end);
-  for (const r of newSlice) {
-    const isOpp = r.conversionShare > r.clickShare;
-    const tr    = document.createElement('tr');
-    if (isOpp) tr.className = 'opp-row';
-    tr.appendChild(tdText(r.searchTerm, 'keyword-cell'));
-    tr.appendChild(tdNum(fmtNum(r.sfr)));
-    tr.appendChild(tdNum(fmtVolume(r.estVolumeLow, r.estVolumeHigh)));
-    tr.appendChild(tdBadge(r.clickPosition));
-    tr.appendChild(tdNum(r.clickShare.toFixed(1) + '%'));
-    tr.appendChild(tdNum(r.conversionShare.toFixed(1) + '%'));
-    if (multipleAsins) tr.appendChild(tdText(r.asin));
-    if (bulkData)      tr.appendChild(tdStatus(r.status));
-    frag.appendChild(tr);
-  }
+  for (const r of newSlice) frag.appendChild(buildResultRow(r));
   resultsTbody.appendChild(frag);
 
   if (end < filteredResults.length) {
@@ -1517,6 +1541,21 @@ showMoreBtn.addEventListener('click', () => {
     showMoreBtn.style.display = 'none';
   }
 });
+
+function buildResultRow(r) {
+  const isOpp = r.conversionShare > r.clickShare;
+  const tr    = document.createElement('tr');
+  if (isOpp) tr.className = 'opp-row';
+  tr.appendChild(tdMono(r.asin));
+  tr.appendChild(tdText(r.searchTerm, 'keyword-cell'));
+  tr.appendChild(tdNum(fmtNum(r.sfr)));
+  tr.appendChild(tdNum(fmtVolume(r.estVolumeLow, r.estVolumeHigh)));
+  tr.appendChild(tdBadge(r.clickPosition));
+  tr.appendChild(tdNum(r.clickShare.toFixed(1) + '%'));
+  tr.appendChild(tdNum(r.conversionShare.toFixed(1) + '%'));
+  tr.appendChild(tdStatus(r.status));
+  return tr;
+}
 
 // Filter + status toggle listeners
 filterInput.addEventListener('input', () => applyFilterAndSort());
@@ -1536,6 +1575,13 @@ statusToggle.querySelectorAll('button').forEach(btn => {
 function tdText(val, cls) {
   const td = document.createElement('td');
   if (cls) td.className = cls;
+  td.textContent = val;
+  return td;
+}
+function tdMono(val) {
+  const td = document.createElement('td');
+  td.style.fontFamily = 'monospace';
+  td.style.fontSize   = '12px';
   td.textContent = val;
   return td;
 }
@@ -1564,50 +1610,41 @@ function tdStatus(status) {
 }
 
 // =============================================================================
-// EXPORT CSV — keyword suggestions (current filter/sort)
+// RATIONALE ENGINE
+// Deterministic rules — no AI. Returns array of reason strings.
 // =============================================================================
-exportBtn.addEventListener('click', () => {
-  const cols   = getColumns();
-  const header = cols.map(c => csvEsc(c.label.replace(' ⓘ', ''))).join(',');
-  const rowLines = filteredResults.map(r => {
-    const cells = [
-      csvEsc(r.searchTerm),
-      r.sfr,
-      `"${fmtK(r.estVolumeLow)}–${fmtK(r.estVolumeHigh)}"`,
-      r.clickPosition,
-      r.clickShare.toFixed(2) + '%',
-      r.conversionShare.toFixed(2) + '%',
-    ];
-    if (multipleAsins) cells.push(csvEsc(r.asin));
-    if (bulkData)      cells.push(r.status || '');
-    return cells.join(',');
-  });
-  const csv  = [header, ...rowLines].join('\r\n');
-  downloadCsv(csv, 'keyword-harvest.csv');
-});
+function buildRationale(r) {
+  const reasons = [];
+  if (r.sfr <= 1000)                            reasons.push('Top 1K search term');
+  else if (r.sfr <= 10000)                      reasons.push('High-volume term (SFR < 10K)');
+  if (r.clickPosition === 1)                    reasons.push('#1 clicked ASIN — top relevance');
+  if (r.conversionShare > r.clickShare)         reasons.push('CVR > CTR — converts better than it clicks');
+  if (r.clickShare >= 20)                       reasons.push(`Dominates clicks (${r.clickShare.toFixed(0)}% share)`);
+  else if (r.clickShare >= 10)                  reasons.push(`Strong click share (${r.clickShare.toFixed(0)}%)`);
+  if (r.conversionShare >= 20)                  reasons.push(`High conv. share (${r.conversionShare.toFixed(0)}%)`);
+  if (reasons.length === 0)                     reasons.push('Appears in top 3 clicked ASINs');
+  return reasons;
+}
+
+// Suggested bid: start from ad group default, adjust by signal strength
+function suggestedBid(r, agBid) {
+  const base = agBid || 0.75;
+  // Premium for top signals
+  let mult = 1.0;
+  if (r.sfr <= 1000)                  mult += 0.20;
+  if (r.clickPosition === 1)          mult += 0.10;
+  if (r.conversionShare > r.clickShare) mult += 0.10;
+  return Math.min(base * mult, base * 1.5).toFixed(2);  // cap at 50% above default
+}
 
 // =============================================================================
-// BULK DOWNLOAD — Amazon Ads bulk upload format (new keywords only)
+// BUILD ACTION ROWS — called inside annotateBulk after bulk data available
 // =============================================================================
-// Amazon Ads bulk upload required columns for adding SP keywords:
-// Product,Entity,Operation,Campaign ID,Ad Group ID,Campaign Name,Ad Group Name,
-// Start Date,End Date,Targeting Type,State,Daily Budget,SKU,Ad Group Default Bid,
-// Bid,Keyword Text,Match Type,Impressions,Clicks,Spend,Sales,Orders,Units,
-// Conversion Rate,Acos,CPC,CTR,ROAS
-// Minimum required for CREATE: Product,Entity,Operation,Campaign Name,Ad Group Name,
-//   State,Keyword Text,Match Type,Bid
-// =============================================================================
-bulkDownloadBtn.addEventListener('click', () => {
+function buildActionRows() {
+  actionRows = [];
   if (!bulkData) return;
 
-  // Collect all new keyword × ad group combinations
-  // One row per (keyword, adGroup, matchType)
-  // Default match types: add as Broad, Phrase, Exact — one row each
-  // (Amazon's bulk sheet expects one row per match type)
-  const MATCH_TYPES = ['broad', 'phrase', 'exact'];
-  const bulkRows = [];
-
-  // Deduplicate: same campaign+adGroup+keyword+matchType should appear once
+  const MATCH_TYPES = ['Broad', 'Phrase', 'Exact'];
   const seen = new Set();
 
   for (const r of parsedResults) {
@@ -1615,56 +1652,215 @@ bulkDownloadBtn.addEventListener('click', () => {
 
     const adGroups = (r.adGroups && r.adGroups.length)
       ? r.adGroups
-      : [{ campaign: 'UNKNOWN - map not found', adGroup: 'UNKNOWN', bid: 0.75 }];
+      : [{ campaign: '', adGroup: '', bid: 0.75 }];
 
     for (const ag of adGroups) {
       for (const mt of MATCH_TYPES) {
-        // Skip match types already in campaigns
-        const existKey = r.searchTerm.toLowerCase() + '|||' + mt;
+        const existKey  = r.searchTerm.toLowerCase() + '|||' + mt.toLowerCase();
         if (bulkData.existingKeys.has(existKey)) continue;
-
-        const dedupeKey = ag.campaign + '||' + ag.adGroup + '||' + r.searchTerm + '||' + mt;
+        const dedupeKey = ag.campaign + '|' + ag.adGroup + '|' + r.searchTerm + '|' + mt;
         if (seen.has(dedupeKey)) continue;
         seen.add(dedupeKey);
 
-        bulkRows.push({
-          campaign:  ag.campaign,
-          adGroup:   ag.adGroup,
-          keyword:   r.searchTerm,
-          matchType: mt.charAt(0).toUpperCase() + mt.slice(1),  // Broad/Phrase/Exact
-          bid:       ag.bid.toFixed(2),
-          asin:      r.asin,
+        actionRows.push({
+          campaign:   ag.campaign || '(not mapped)',
+          adGroup:    ag.adGroup  || '(not mapped)',
+          asin:       r.asin,
+          keyword:    r.searchTerm,
+          matchType:  mt,
+          bid:        suggestedBid(r, ag.bid),
+          rationale:  buildRationale(r),
+          // carry signal data for sort
+          sfr:        r.sfr,
+          clickPosition: r.clickPosition,
+          conversionShare: r.conversionShare,
+          clickShare: r.clickShare,
         });
       }
     }
   }
+  // Default sort: SFR ascending
+  actionRows.sort((a, b) => a.sfr - b.sfr);
+}
 
-  if (!bulkRows.length) {
+// =============================================================================
+// OUTPUT 2 — RENDER ACTION TABLE
+// =============================================================================
+const ACTION_COLS = [
+  { label: 'Campaign',     key: 'campaign'   },
+  { label: 'Ad Group',     key: 'adGroup'    },
+  { label: 'ASIN',         key: 'asin'       },
+  { label: 'Keyword',      key: 'keyword'    },
+  { label: 'Match Type',   key: 'matchType'  },
+  { label: 'Bid ($)',      key: 'bid'        },
+  { label: 'Rationale',    key: 'rationale'  },
+];
+
+function renderActionTable() {
+  // Build header once
+  actionThead.innerHTML = '';
+  const tr = document.createElement('tr');
+  for (const col of ACTION_COLS) {
+    const th = document.createElement('th');
+    th.textContent = col.label;
+    tr.appendChild(th);
+  }
+  actionThead.appendChild(tr);
+
+  applyActionFilter();
+  actionSection.style.display = 'block';
+}
+
+function applyActionFilter() {
+  const q = actionFilter.value.trim().toLowerCase();
+  filteredActions = q
+    ? actionRows.filter(r =>
+        r.keyword.toLowerCase().includes(q) ||
+        r.campaign.toLowerCase().includes(q) ||
+        r.adGroup.toLowerCase().includes(q) ||
+        r.asin.toLowerCase().includes(q))
+    : [...actionRows];
+  actionPage = 0;
+  renderActionPage();
+}
+
+function renderActionPage() {
+  actionTbody.innerHTML = '';
+  const end   = (actionPage + 1) * PAGE_SIZE;
+  const slice = filteredActions.slice(0, end);
+
+  if (!slice.length) {
+    const tr = document.createElement('tr');
+    const td = document.createElement('td');
+    td.colSpan = ACTION_COLS.length;
+    td.className = 'empty-state';
+    td.textContent = actionRows.length
+      ? 'No rows match your filter.'
+      : 'No new keywords to add — all suggestions are already in your campaigns.';
+    tr.appendChild(td); actionTbody.appendChild(tr);
+    showMoreActionBtn.style.display = 'none';
+    return;
+  }
+
+  const frag = document.createDocumentFragment();
+  for (const r of slice) frag.appendChild(buildActionRow(r));
+  actionTbody.appendChild(frag);
+
+  if (end < filteredActions.length) {
+    const rem = filteredActions.length - end;
+    showMoreActionBtn.textContent = `Show more (${fmtNum(Math.min(PAGE_SIZE, rem))} of ${fmtNum(rem)} remaining)`;
+    showMoreActionBtn.style.display = 'block';
+  } else {
+    showMoreActionBtn.style.display = 'none';
+  }
+}
+
+function buildActionRow(r) {
+  const tr = document.createElement('tr');
+  tr.appendChild(tdText(r.campaign));
+  tr.appendChild(tdText(r.adGroup));
+  tr.appendChild(tdMono(r.asin));
+  tr.appendChild(tdText(r.keyword, 'keyword-cell'));
+  // Match type badge
+  const mtTd   = document.createElement('td');
+  const mtSpan = document.createElement('span');
+  mtSpan.className = 'status-badge status-new';
+  mtSpan.textContent = r.matchType;
+  mtTd.appendChild(mtSpan); tr.appendChild(mtTd);
+  // Bid
+  tr.appendChild(tdNum('$' + r.bid));
+  // Rationale
+  const rtTd = document.createElement('td');
+  rtTd.className = 'rationale';
+  rtTd.innerHTML = r.rationale.map(s => `<strong>·</strong> ${escHtml(s)}`).join('<br>');
+  tr.appendChild(rtTd);
+  return tr;
+}
+
+showMoreActionBtn.addEventListener('click', () => {
+  actionPage++;
+  const end      = (actionPage + 1) * PAGE_SIZE;
+  const prevEnd  = actionPage * PAGE_SIZE;
+  const newSlice = filteredActions.slice(prevEnd, end);
+  const frag     = document.createDocumentFragment();
+  for (const r of newSlice) frag.appendChild(buildActionRow(r));
+  actionTbody.appendChild(frag);
+  if (end < filteredActions.length) {
+    const rem = filteredActions.length - end;
+    showMoreActionBtn.textContent = `Show more (${fmtNum(Math.min(PAGE_SIZE, rem))} of ${fmtNum(rem)} remaining)`;
+  } else {
+    showMoreActionBtn.style.display = 'none';
+  }
+});
+
+actionFilter.addEventListener('input', () => applyActionFilter());
+
+// =============================================================================
+// EXPORT CSV — keyword suggestions (current filter/sort)
+// =============================================================================
+exportBtn.addEventListener('click', () => {
+  const header = 'ASIN,Keyword,SFR,Est. monthly volume,Click position,Click share %,Conv. share %,Status';
+  const rowLines = filteredResults.map(r => [
+    csvEsc(r.asin),
+    csvEsc(r.searchTerm),
+    r.sfr,
+    `"${fmtK(r.estVolumeLow)}–${fmtK(r.estVolumeHigh)}"`,
+    r.clickPosition,
+    r.clickShare.toFixed(2) + '%',
+    r.conversionShare.toFixed(2) + '%',
+    r.status || '',
+  ].join(','));
+  downloadCsv([header, ...rowLines].join('\r\n'), 'keyword-suggestions.csv');
+});
+
+// =============================================================================
+// EXPORT CSV — action plan
+// =============================================================================
+exportActionBtn.addEventListener('click', () => {
+  const header = 'Campaign,Ad Group,ASIN,Keyword,Match Type,Bid,Rationale';
+  const lines = filteredActions.map(r => [
+    csvEsc(r.campaign),
+    csvEsc(r.adGroup),
+    csvEsc(r.asin),
+    csvEsc(r.keyword),
+    csvEsc(r.matchType),
+    r.bid,
+    csvEsc(r.rationale.join(' | ')),
+  ].join(','));
+  downloadCsv([header, ...lines].join('\r\n'), 'campaign-action-plan.csv');
+});
+
+// =============================================================================
+// BULK DOWNLOAD — Amazon Ads bulk upload sheet (from action rows)
+// =============================================================================
+bulkDownloadBtn.addEventListener('click', () => {
+  if (!actionRows.length) {
     showError('No new keywords to download — all suggestions are already in your campaigns.');
     return;
   }
 
-  // Amazon Ads bulk upload header — SP keywords
+  // Use currently filtered action rows so filter/search applies to bulk download too
+  const rowsToExport = filteredActions.length ? filteredActions : actionRows;
+
   const header = [
     'Product','Entity','Operation',
     'Campaign Name','Ad Group Name',
     'State','Keyword Text','Match Type','Bid',
   ].map(csvEsc).join(',');
 
-  const lines = bulkRows.map(row => [
+  const lines = rowsToExport.map(r => [
     csvEsc('Sponsored Products'),
     csvEsc('Keyword'),
     csvEsc('Create'),
-    csvEsc(row.campaign),
-    csvEsc(row.adGroup),
+    csvEsc(r.campaign),
+    csvEsc(r.adGroup),
     csvEsc('enabled'),
-    csvEsc(row.keyword),
-    csvEsc(row.matchType),
-    row.bid,
+    csvEsc(r.keyword),
+    csvEsc(r.matchType),
+    r.bid,
   ].join(','));
 
-  const csv = [header, ...lines].join('\r\n');
-  downloadCsv(csv, 'bulk-keyword-upload.csv');
+  downloadCsv([header, ...lines].join('\r\n'), 'bulk-keyword-upload.csv');
 });
 
 function downloadCsv(csv, filename) {
