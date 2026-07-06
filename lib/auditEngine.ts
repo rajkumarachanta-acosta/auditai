@@ -380,7 +380,7 @@ function runAsinAudit(
     cumulative += item.rev;
     const pct = totalRev > 0 ? cumulative / totalRev : 0;
     const revenuePerView = item.pageViews > 0 ? item.rev / item.pageViews : 0;
-    const returnRate = item.units > 0 ? item.returns / item.units : 0;
+    const returnRate = item.units > 0 ? Math.min(item.returns / item.units, 1) : 0;
 
     let cohort: AsinCohort["cohort"];
     if (pct <= 0.8 && item.rev > 0) {
@@ -741,7 +741,7 @@ export function runAuditEngine(data: RawData): AuditResult {
     totalPageViews:      totalPV,
     asinCount:   asinSet.size,
     topBrand,
-    returnRate:  totalUnits > 0 ? totalReturns / totalUnits : 0,
+    returnRate:  totalUnits > 0 ? Math.min(totalReturns / totalUnits, 1) : 0,
     wasteRatio:  totalSpend > 0 ? zeroSalesSpend / totalSpend : 0,
     reportingDays: 30,
   };
@@ -809,11 +809,18 @@ export function runAuditEngine(data: RawData): AuditResult {
       brand: str(col(row, "Brand")),
       orderedRevenue: 0, orderedUnits: 0, pageViews: 0, returnRate: 0, revenuePerView: 0,
       adSpend: 0, adSales: 0, adOrders: 0, adClicks: 0, acos: 0, cvr: 0, ctr: 0,
-    };
+      _totalReturns: 0,
+    } as AsinRow & { _totalReturns: number };
+    (asinAgg[asin] as AsinRow & { _totalReturns: number })._totalReturns += num(col(row, "Customer Returns"));
     asinAgg[asin].orderedRevenue += num(col(row, "Ordered Revenue"));
     asinAgg[asin].orderedUnits  += num(col(row, "Ordered Units"));
-    const returns = num(col(row, "Customer Returns"));
-    asinAgg[asin].returnRate = asinAgg[asin].orderedUnits > 0 ? returns / asinAgg[asin].orderedUnits : 0;
+  }
+  // Compute return rate once after all rows are accumulated (avoids divide-by-running-total bug)
+  for (const asin of Object.keys(asinAgg)) {
+    const row = asinAgg[asin] as AsinRow & { _totalReturns: number };
+    row.returnRate = row.orderedUnits > 0
+      ? Math.min(row._totalReturns / row.orderedUnits, 1)  // cap at 100% — cross-period returns can exceed ordered units
+      : 0;
   }
   for (const row of traffic) {
     const asin = str(col(row, "ASIN"));
