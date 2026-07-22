@@ -22,6 +22,22 @@ combines three approaches:
 LinkedIn and Indeed are intentionally not scraped — both actively block and
 prohibit it in their terms of service.
 
+## Auto-save & resume tailoring
+
+Every collection run (`lib/resumeVariants.ts`) auto-flips any job scoring
+**80+** from `new` to `saved` and attaches a note naming which of your
+tailored resumes to apply with (classified from the job title — Customer
+Success / Retail Media & Ad Ops / Country Head-GM). The **Saved** tab is
+therefore a standing "ready to apply" tracker that refreshes daily on its
+own, not something rebuilt by hand. It never touches a job whose status you
+changed yourself (Applied/Hidden/Not interested stay put).
+
+Actually submitting applications is intentionally not automated — there's no
+unified apply API across ATSs and recruiter sites, and screening questions
+(salary, work authorization, EEO self-identification, consent statements)
+need a real person's answers. This app prepares the shortlist and materials;
+you do the one-click submits.
+
 ## Deploying
 
 1. **Create a Vercel project** pointed at this repo with **Root Directory**
