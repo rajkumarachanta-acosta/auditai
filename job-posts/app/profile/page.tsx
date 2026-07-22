@@ -49,9 +49,27 @@ interface Company {
   display_name: string | null;
 }
 
+const inputStyle = "w-full rounded-lg px-3 py-2 text-sm outline-none";
+const inputBorder = { background: "var(--surface-1)", border: "1px solid var(--border)" };
+const label = "mb-1 block text-sm font-medium";
+
+function Section({ title, description, children }: { title: string; description?: string; children: React.ReactNode }) {
+  return (
+    <section className="surface-card rounded-xl p-5">
+      <h2 className="text-[15px] font-semibold">{title}</h2>
+      {description && (
+        <p className="mt-1 text-sm" style={{ color: "var(--ink-muted)" }}>
+          {description}
+        </p>
+      )}
+      <div className="mt-4 space-y-4">{children}</div>
+    </section>
+  );
+}
+
 export default function ProfilePage() {
   const [form, setForm] = useState<ProfileForm>(empty);
-  const [saved, setSaved] = useState(false);
+  const [saveState, setSaveState] = useState<"idle" | "saving" | "saved">("idle");
   const [companies, setCompanies] = useState<Company[]>([]);
   const [newCompany, setNewCompany] = useState({ ats: "greenhouse", token: "", workday_dc: "", workday_site: "", display_name: "" });
 
@@ -88,7 +106,7 @@ export default function ProfilePage() {
   }
 
   async function save() {
-    setSaved(false);
+    setSaveState("saving");
     await fetch("/api/profile", {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
@@ -109,7 +127,8 @@ export default function ProfilePage() {
         resume_text: form.resume_text || null,
       }),
     });
-    setSaved(true);
+    setSaveState("saved");
+    setTimeout(() => setSaveState("idle"), 2000);
   }
 
   async function addCompany() {
@@ -132,45 +151,47 @@ export default function ProfilePage() {
     loadCompanies();
   }
 
-  const input = "w-full rounded-md border border-neutral-300 bg-transparent px-3 py-1.5 text-sm dark:border-neutral-700";
-  const label = "block text-sm font-medium mb-1";
-
   return (
-    <div className="max-w-2xl space-y-8">
-      <section className="space-y-4">
-        <h2 className="text-lg font-semibold">Your profile</h2>
-        <p className="text-sm text-neutral-500">
-          This drives what the agent searches for and how it scores matches. Comma-separate list fields.
+    <div className="mx-auto max-w-2xl space-y-6 pb-16">
+      <div>
+        <h1 className="text-xl font-semibold tracking-tight">Profile</h1>
+        <p className="mt-0.5 text-sm" style={{ color: "var(--ink-muted)" }}>
+          This drives what the agent searches for and how it scores matches.
         </p>
+      </div>
 
+      <Section title="Target role" description="Comma-separate multiple entries.">
         <div>
-          <label className={label}>Target job titles</label>
-          <input className={input} value={form.target_titles} onChange={(e) => setForm({ ...form, target_titles: e.target.value })} placeholder="Senior Data Analyst, Product Manager" />
+          <label className={label}>Job titles</label>
+          <input className={inputStyle} style={inputBorder} value={form.target_titles} onChange={(e) => setForm({ ...form, target_titles: e.target.value })} placeholder="Senior Data Analyst, Product Manager" />
         </div>
         <div className="grid grid-cols-2 gap-4">
           <div>
             <label className={label}>Seniority</label>
-            <input className={input} value={form.seniority} onChange={(e) => setForm({ ...form, seniority: e.target.value })} placeholder="Senior" />
+            <input className={inputStyle} style={inputBorder} value={form.seniority} onChange={(e) => setForm({ ...form, seniority: e.target.value })} placeholder="Senior" />
           </div>
           <div>
             <label className={label}>Years of experience</label>
-            <input className={input} type="number" value={form.years_experience} onChange={(e) => setForm({ ...form, years_experience: e.target.value })} />
+            <input className={inputStyle} style={inputBorder} type="number" value={form.years_experience} onChange={(e) => setForm({ ...form, years_experience: e.target.value })} />
           </div>
         </div>
         <div>
           <label className={label}>Key skills</label>
-          <input className={input} value={form.skills} onChange={(e) => setForm({ ...form, skills: e.target.value })} placeholder="SQL, Python, Tableau" />
+          <input className={inputStyle} style={inputBorder} value={form.skills} onChange={(e) => setForm({ ...form, skills: e.target.value })} placeholder="SQL, Python, Tableau" />
         </div>
+      </Section>
+
+      <Section title="Location & work authorization">
         <div>
           <label className={label}>Locations / countries you&apos;d work in</label>
-          <input className={input} value={form.locations} onChange={(e) => setForm({ ...form, locations: e.target.value })} placeholder="United States, Canada, Remote" />
+          <input className={inputStyle} style={inputBorder} value={form.locations} onChange={(e) => setForm({ ...form, locations: e.target.value })} placeholder="United States, Canada, Remote" />
         </div>
         <label className="flex items-center gap-2 text-sm">
           <input type="checkbox" checked={form.remote_only} onChange={(e) => setForm({ ...form, remote_only: e.target.checked })} />
           Remote only
         </label>
 
-        <div className="rounded-md border border-neutral-200 p-3 dark:border-neutral-800 space-y-3">
+        <div className="rounded-lg p-3.5" style={{ background: "var(--surface-2)" }}>
           <label className="flex items-center gap-2 text-sm font-medium">
             <input
               type="checkbox"
@@ -180,86 +201,96 @@ export default function ProfilePage() {
             I need visa/work-permit sponsorship
           </label>
           {form.visa_sponsorship_needed && (
-            <div className="grid grid-cols-2 gap-4">
+            <div className="mt-3 grid grid-cols-2 gap-4">
               <div>
                 <label className={label}>From country</label>
-                <input className={input} value={form.visa_from_country} onChange={(e) => setForm({ ...form, visa_from_country: e.target.value })} placeholder="India" />
+                <input className={inputStyle} style={inputBorder} value={form.visa_from_country} onChange={(e) => setForm({ ...form, visa_from_country: e.target.value })} placeholder="India" />
               </div>
               <div>
                 <label className={label}>Target countries</label>
-                <input className={input} value={form.visa_to_countries} onChange={(e) => setForm({ ...form, visa_to_countries: e.target.value })} placeholder="United States, Canada" />
+                <input className={inputStyle} style={inputBorder} value={form.visa_to_countries} onChange={(e) => setForm({ ...form, visa_to_countries: e.target.value })} placeholder="United States, Canada" />
               </div>
             </div>
           )}
         </div>
+      </Section>
 
+      <Section title="Compensation & exclusions">
         <div className="grid grid-cols-2 gap-4">
           <div>
             <label className={label}>Salary floor</label>
-            <input className={input} type="number" value={form.salary_floor} onChange={(e) => setForm({ ...form, salary_floor: e.target.value })} />
+            <input className={inputStyle} style={inputBorder} type="number" value={form.salary_floor} onChange={(e) => setForm({ ...form, salary_floor: e.target.value })} />
           </div>
           <div>
             <label className={label}>Currency</label>
-            <input className={input} value={form.salary_currency} onChange={(e) => setForm({ ...form, salary_currency: e.target.value })} />
+            <input className={inputStyle} style={inputBorder} value={form.salary_currency} onChange={(e) => setForm({ ...form, salary_currency: e.target.value })} />
           </div>
         </div>
         <div>
           <label className={label}>Exclude companies</label>
-          <input className={input} value={form.excluded_companies} onChange={(e) => setForm({ ...form, excluded_companies: e.target.value })} placeholder="Current or past employer" />
+          <input className={inputStyle} style={inputBorder} value={form.excluded_companies} onChange={(e) => setForm({ ...form, excluded_companies: e.target.value })} placeholder="Current or past employer" />
         </div>
         <div>
           <label className={label}>Exclude if description mentions</label>
-          <input className={input} value={form.excluded_keywords} onChange={(e) => setForm({ ...form, excluded_keywords: e.target.value })} placeholder="unpaid, commission only" />
+          <input className={inputStyle} style={inputBorder} value={form.excluded_keywords} onChange={(e) => setForm({ ...form, excluded_keywords: e.target.value })} placeholder="unpaid, commission only" />
         </div>
-        <div>
-          <label className={label}>Resume (paste text)</label>
-          <textarea className={input} rows={8} value={form.resume_text} onChange={(e) => setForm({ ...form, resume_text: e.target.value })} />
-        </div>
+      </Section>
 
-        <button onClick={save} className="rounded-md bg-blue-600 px-4 py-2 text-sm font-medium text-white">
-          Save profile
+      <Section title="Resume">
+        <textarea className={inputStyle} style={inputBorder} rows={8} value={form.resume_text} onChange={(e) => setForm({ ...form, resume_text: e.target.value })} placeholder="Paste resume text here…" />
+      </Section>
+
+      <div className="flex items-center gap-3">
+        <button
+          onClick={save}
+          disabled={saveState === "saving"}
+          className="rounded-lg px-4 py-2 text-sm font-medium text-white transition-opacity disabled:opacity-60"
+          style={{ background: "var(--accent)" }}
+        >
+          {saveState === "saving" ? "Saving…" : "Save profile"}
         </button>
-        {saved && <span className="ml-3 text-sm text-green-600">Saved.</span>}
-      </section>
+        {saveState === "saved" && (
+          <span className="text-sm font-medium" style={{ color: "var(--good)" }}>
+            Saved
+          </span>
+        )}
+      </div>
 
-      <section className="space-y-3">
-        <h2 className="text-lg font-semibold">Target companies</h2>
-        <p className="text-sm text-neutral-500">
-          Companies whose career pages the collector polls directly. Add more by finding the company&apos;s ATS: for
-          Greenhouse/Lever, it&apos;s usually the slug in their careers URL. For Workday, open the careers page,
-          watch the Network tab for a request to <code>*/wday/cxs/*/jobs</code>, and read the tenant/dc/site off that URL.
-        </p>
-        <ul className="space-y-1 text-sm">
+      <Section
+        title="Target companies"
+        description="Companies whose career pages the collector polls directly. For Greenhouse/Lever, it's usually the slug in their careers URL. For Workday, open the careers page, watch the Network tab for a request to */wday/cxs/*/jobs, and read the tenant/dc/site off that URL."
+      >
+        <ul className="space-y-1.5">
           {companies.map((c) => (
-            <li key={c.id} className="flex items-center justify-between rounded-md border border-neutral-200 px-3 py-1.5 dark:border-neutral-800">
+            <li key={c.id} className="flex items-center justify-between rounded-lg px-3 py-2 text-sm" style={{ background: "var(--surface-2)" }}>
               <span>
-                {c.display_name || c.token} <span className="text-neutral-500">({c.ats})</span>
+                {c.display_name || c.token} <span style={{ color: "var(--ink-muted)" }}>({c.ats})</span>
               </span>
-              <button onClick={() => removeCompany(c.id)} className="text-red-600 hover:underline">
-                remove
+              <button onClick={() => removeCompany(c.id)} className="text-sm font-medium" style={{ color: "var(--critical)" }}>
+                Remove
               </button>
             </li>
           ))}
         </ul>
-        <div className="flex flex-wrap gap-2 items-end">
-          <select className={input + " w-auto"} value={newCompany.ats} onChange={(e) => setNewCompany({ ...newCompany, ats: e.target.value })}>
+        <div className="flex flex-wrap items-end gap-2 pt-1">
+          <select className={inputStyle + " w-auto"} style={inputBorder} value={newCompany.ats} onChange={(e) => setNewCompany({ ...newCompany, ats: e.target.value })}>
             <option value="greenhouse">Greenhouse</option>
             <option value="lever">Lever</option>
             <option value="workday">Workday</option>
           </select>
-          <input className={input + " w-auto"} placeholder="token / tenant" value={newCompany.token} onChange={(e) => setNewCompany({ ...newCompany, token: e.target.value })} />
+          <input className={inputStyle + " w-auto"} style={inputBorder} placeholder="token / tenant" value={newCompany.token} onChange={(e) => setNewCompany({ ...newCompany, token: e.target.value })} />
           {newCompany.ats === "workday" && (
             <>
-              <input className={input + " w-auto"} placeholder="dc (e.g. wd5)" value={newCompany.workday_dc} onChange={(e) => setNewCompany({ ...newCompany, workday_dc: e.target.value })} />
-              <input className={input + " w-auto"} placeholder="site" value={newCompany.workday_site} onChange={(e) => setNewCompany({ ...newCompany, workday_site: e.target.value })} />
+              <input className={inputStyle + " w-auto"} style={inputBorder} placeholder="dc (e.g. wd5)" value={newCompany.workday_dc} onChange={(e) => setNewCompany({ ...newCompany, workday_dc: e.target.value })} />
+              <input className={inputStyle + " w-auto"} style={inputBorder} placeholder="site" value={newCompany.workday_site} onChange={(e) => setNewCompany({ ...newCompany, workday_site: e.target.value })} />
             </>
           )}
-          <input className={input + " w-auto"} placeholder="display name" value={newCompany.display_name} onChange={(e) => setNewCompany({ ...newCompany, display_name: e.target.value })} />
-          <button onClick={addCompany} className="rounded-md border px-3 py-1.5 text-sm dark:border-neutral-700">
+          <input className={inputStyle + " w-auto"} style={inputBorder} placeholder="display name" value={newCompany.display_name} onChange={(e) => setNewCompany({ ...newCompany, display_name: e.target.value })} />
+          <button onClick={addCompany} className="rounded-lg px-3 py-2 text-sm font-medium" style={inputBorder}>
             Add
           </button>
         </div>
-      </section>
+      </Section>
     </div>
   );
 }

@@ -4,6 +4,7 @@ import { fetchGreenhouse } from "./sources/greenhouse";
 import { fetchLever } from "./sources/lever";
 import { fetchWorkday } from "./sources/workday";
 import { fetchRemotive } from "./sources/remotive";
+import { fetchAmazonJobs } from "./sources/amazonjobs";
 import { fetchRemoteOk } from "./sources/remoteok";
 import { fetchArbeitnow } from "./sources/arbeitnow";
 import { fetchAdzuna } from "./sources/adzuna";
@@ -124,6 +125,16 @@ export async function runCollection(): Promise<CollectionResult> {
     searchTerms.map(async (term) => {
       try {
         jobLists.push(await fetchRemotive(term));
+      } catch {
+        /* ignore */
+      }
+    })
+  );
+
+  await Promise.all(
+    searchTerms.map(async (term) => {
+      try {
+        jobLists.push(await fetchAmazonJobs(term));
       } catch {
         /* ignore */
       }
