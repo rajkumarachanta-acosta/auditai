@@ -1,5 +1,6 @@
 import { Profile } from "./profile";
 import { RawJob } from "./sources/types";
+import { mapPool } from "./concurrency";
 
 export interface MatchedJob extends RawJob {
   matchScore: number;
@@ -95,12 +96,10 @@ async function scoreBatch(profile: Profile, jobs: RawJob[]): Promise<MatchedJob[
   });
 }
 
+const BATCH_CONCURRENCY = 6;
+
 export async function matchJobs(profile: Profile, jobs: RawJob[]): Promise<MatchedJob[]> {
   const batches = chunk(jobs, BATCH_SIZE);
-  const results: MatchedJob[] = [];
-  for (const batch of batches) {
-    const scored = await scoreBatch(profile, batch);
-    results.push(...scored);
-  }
-  return results;
+  const scored = await mapPool(batches, BATCH_CONCURRENCY, (batch) => scoreBatch(profile, batch));
+  return scored.flat();
 }

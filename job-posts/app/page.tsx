@@ -59,7 +59,7 @@ export default function Dashboard() {
       const res = await fetch("/api/collect", { method: "POST" });
       const data = await res.json();
       if (res.ok) {
-        setRunMsg(`Fetched ${data.fetched}, scored ${data.matched} across ${data.companiesQueried} target companies.`);
+        setRunMsg(`Found ${data.fetched}, scored ${data.matched} (capped at ${data.processed}) across ${data.companiesQueried} target companies.`);
         load();
       } else {
         setRunMsg(`Failed: ${data.error}`);

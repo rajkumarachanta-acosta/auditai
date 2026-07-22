@@ -10,6 +10,12 @@ import { fetchAdzuna } from "./sources/adzuna";
 import { RawJob, jobId } from "./sources/types";
 import { matchJobs } from "./matcher";
 import { adzunaCountriesFromProfile } from "./countries";
+import { mapPool } from "./concurrency";
+
+// Bounds run time (serverless function budget) and OpenAI spend per run.
+// Newest postings are kept first when a run turns up more than this.
+const MAX_JOBS_PER_RUN = 400;
+const DB_WRITE_CONCURRENCY = 20;
 
 interface ProfileRow {
   target_titles: string[] | null;
@@ -89,6 +95,7 @@ function applyHardFilters(jobs: RawJob[], profile: Profile): RawJob[] {
 
 export interface CollectionResult {
   fetched: number;
+  processed: number;
   matched: number;
   companiesQueried: number;
 }
@@ -148,11 +155,14 @@ export async function runCollection(): Promise<CollectionResult> {
   );
 
   const all = dedupe(jobLists.flat());
-  const filtered = applyHardFilters(all, profile);
+  const filtered = applyHardFilters(all, profile)
+    .sort((a, b) => (b.postedAt || "").localeCompare(a.postedAt || ""))
+    .slice(0, MAX_JOBS_PER_RUN);
+
   const matched = await matchJobs(profile, filtered);
 
   const db = sql();
-  for (const j of matched) {
+  await mapPool(matched, DB_WRITE_CONCURRENCY, async (j) => {
     const id = jobId(j.source, j.externalId);
     await db`
       insert into jobs (id, source, external_id, title, company, location, remote, country, visa_sponsorship, url, description, salary_text, posted_at, match_score, match_reason)
@@ -163,7 +173,7 @@ export async function runCollection(): Promise<CollectionResult> {
         visa_sponsorship = excluded.visa_sponsorship,
         collected_at = now()
     `;
-  }
+  });
 
-  return { fetched: all.length, matched: matched.length, companiesQueried: companies.length };
+  return { fetched: all.length, processed: filtered.length, matched: matched.length, companiesQueried: companies.length };
 }
