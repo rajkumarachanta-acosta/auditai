@@ -5,6 +5,7 @@ import {
   Bookmark,
   CheckCircle2,
   EyeOff,
+  FileCheck,
   Globe2,
   Loader2,
   MapPin,
@@ -277,6 +278,11 @@ export default function Dashboard() {
                     {j.match_reason && (
                       <p className="mt-2.5 text-sm leading-relaxed" style={{ color: "var(--ink-muted)" }}>
                         {j.match_reason}
+                      </p>
+                    )}
+                    {j.notes && (
+                      <p className="mt-2 inline-flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs font-medium" style={{ background: "var(--good-soft)", color: "var(--good)" }}>
+                        <FileCheck size={13} /> {j.notes}
                       </p>
                     )}
                   </div>

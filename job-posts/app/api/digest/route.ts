@@ -20,6 +20,8 @@ interface JobRow {
   url: string;
   match_score: number | null;
   match_reason: string | null;
+  status: string;
+  notes: string | null;
 }
 
 async function handle(req: NextRequest) {
@@ -28,10 +30,13 @@ async function handle(req: NextRequest) {
   }
 
   const db = sql();
+  // status in ('new','saved') — a top scorer gets auto-flipped to 'saved' with a
+  // resume-variant note the moment it's collected, so it must not disappear from
+  // the digest just because it's no longer sitting in the 'new' bucket.
   const rows = (await db`
-    select id, title, company, location, remote, visa_sponsorship, url, match_score, match_reason
+    select id, title, company, location, remote, visa_sponsorship, url, match_score, match_reason, status, notes
     from jobs
-    where status = 'new' and collected_at > now() - interval '26 hours'
+    where status in ('new', 'saved') and collected_at > now() - interval '26 hours'
     order by match_score desc nulls last
     limit 20
   `) as JobRow[];
@@ -48,8 +53,11 @@ async function handle(req: NextRequest) {
     return NextResponse.json({ ok: true, sent: false, reason: "no new matches" });
   }
 
+  const readyToApply = rows.filter((j) => j.status === "saved" && j.notes);
+
   const html = `
     <h2>${rows.length} new job match${rows.length === 1 ? "" : "es"}</h2>
+    ${readyToApply.length ? `<p>${readyToApply.length} scored high enough to be auto-saved with a resume recommendation — check the <strong>Saved</strong> tab.</p>` : ""}
     <ol>
       ${rows
         .map(
@@ -57,6 +65,7 @@ async function handle(req: NextRequest) {
             <a href="${j.url}"><strong>${j.title}</strong></a> — ${j.company}
             ${j.location ? ` · ${j.location}` : ""}${j.remote ? " · Remote" : ""}${j.visa_sponsorship ? " · Visa sponsorship likely" : ""}
             <br/><span style="color:#666">Score ${j.match_score ?? "?"}/100 — ${j.match_reason ?? ""}</span>
+            ${j.notes ? `<br/><span style="color:#0ca35f">${j.notes}</span>` : ""}
           </li>`
         )
         .join("")}

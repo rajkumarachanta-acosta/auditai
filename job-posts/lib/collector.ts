@@ -12,6 +12,7 @@ import { RawJob, jobId } from "./sources/types";
 import { matchJobs } from "./matcher";
 import { adzunaCountriesFromProfile } from "./countries";
 import { mapPool } from "./concurrency";
+import { AUTO_SAVE_THRESHOLD, autoSaveNote } from "./resumeVariants";
 
 // Bounds run time (serverless function budget) and OpenAI spend per run.
 // Newest postings are kept first when a run turns up more than this.
@@ -175,14 +176,19 @@ export async function runCollection(): Promise<CollectionResult> {
   const db = sql();
   await mapPool(matched, DB_WRITE_CONCURRENCY, async (j) => {
     const id = jobId(j.source, j.externalId);
+    const autoSave = j.matchScore >= AUTO_SAVE_THRESHOLD;
+    const initialStatus = autoSave ? "saved" : "new";
+    const initialNotes = autoSave ? autoSaveNote(j.title) : null;
     await db`
-      insert into jobs (id, source, external_id, title, company, location, remote, country, visa_sponsorship, url, description, salary_text, posted_at, match_score, match_reason)
-      values (${id}, ${j.source}, ${j.externalId}, ${j.title}, ${j.company}, ${j.location || null}, ${j.remote ?? false}, ${j.country || null}, ${j.visaSponsorship}, ${j.url}, ${j.description || null}, ${j.salaryText || null}, ${j.postedAt || null}, ${j.matchScore}, ${j.matchReason})
+      insert into jobs (id, source, external_id, title, company, location, remote, country, visa_sponsorship, url, description, salary_text, posted_at, match_score, match_reason, status, notes)
+      values (${id}, ${j.source}, ${j.externalId}, ${j.title}, ${j.company}, ${j.location || null}, ${j.remote ?? false}, ${j.country || null}, ${j.visaSponsorship}, ${j.url}, ${j.description || null}, ${j.salaryText || null}, ${j.postedAt || null}, ${j.matchScore}, ${j.matchReason}, ${initialStatus}, ${initialNotes})
       on conflict (id) do update set
         match_score = excluded.match_score,
         match_reason = excluded.match_reason,
         visa_sponsorship = excluded.visa_sponsorship,
-        collected_at = now()
+        collected_at = now(),
+        status = case when jobs.status = 'new' and excluded.match_score >= ${AUTO_SAVE_THRESHOLD} then excluded.status else jobs.status end,
+        notes = case when jobs.status = 'new' and excluded.match_score >= ${AUTO_SAVE_THRESHOLD} then excluded.notes else jobs.notes end
     `;
   });
 
