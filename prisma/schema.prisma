@@ -1,0 +1,270 @@
+// Reachy — Prisma schema
+// Scoped to the "reachy" section of the auditai app. The existing Acosta
+// Audit Engine product is fully client-side and has no models here.
+
+generator client {
+  provider = "prisma-client"
+  output   = "../lib/reachy/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+// ── Auth.js (NextAuth v5) — standard adapter shape ──────────────────────
+
+enum Role {
+  ADMIN
+  MANAGER
+  VIEWER
+}
+
+model User {
+  id            String    @id @default(cuid())
+  name          String?
+  email         String    @unique
+  emailVerified DateTime?
+  image         String?
+  password      String? // set only for credentials sign-in
+  role          Role      @default(VIEWER)
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  accounts Account[]
+  sessions Session[]
+  reports  Report[]
+
+  @@map("reachy_users")
+}
+
+model Account {
+  id                String  @id @default(cuid())
+  userId            String
+  type              String
+  provider          String
+  providerAccountId String
+  refresh_token     String? @db.Text
+  access_token      String? @db.Text
+  expires_at        Int?
+  token_type        String?
+  scope             String?
+  id_token          String? @db.Text
+  session_state     String?
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([provider, providerAccountId])
+  @@map("reachy_accounts")
+}
+
+model Session {
+  id           String   @id @default(cuid())
+  sessionToken String   @unique
+  userId       String
+  expires      DateTime
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("reachy_sessions")
+}
+
+model VerificationToken {
+  identifier String
+  token      String   @unique
+  expires    DateTime
+
+  @@unique([identifier, token])
+  @@map("reachy_verification_tokens")
+}
+
+// ── Connectors / ingestion ──────────────────────────────────────────────
+
+model Source {
+  id         String    @id @default(cuid())
+  key        String    @unique // connector id, e.g. "reddit", "amazon-forums"
+  name       String
+  enabled    Boolean   @default(false)
+  config     Json      @default("{}")
+  lastRunAt  DateTime?
+  lastStatus String? // "OK" | "ERROR"
+  lastError  String?
+  createdAt  DateTime  @default(now())
+  updatedAt  DateTime  @updatedAt
+
+  rawItems RawItem[]
+
+  @@map("reachy_sources")
+}
+
+model RawItem {
+  id          String    @id @default(cuid())
+  sourceId    String
+  externalId  String // id/url fragment from the origin platform
+  title       String
+  url         String
+  author      String?
+  content     String    @db.Text
+  contentHash String // sha256 of normalized title+content, dedup key
+  publishedAt DateTime?
+  fetchedAt   DateTime  @default(now())
+  processed   Boolean   @default(false)
+  processedAt DateTime?
+
+  source     Source      @relation(fields: [sourceId], references: [id], onDelete: Cascade)
+  painPoints PainPoint[]
+
+  @@unique([sourceId, externalId])
+  @@unique([sourceId, contentHash])
+  @@index([processed])
+  @@map("reachy_raw_items")
+}
+
+// ── Taxonomy ─────────────────────────────────────────────────────────────
+
+model Category {
+  id       String  @id @default(cuid())
+  name     String
+  slug     String  @unique
+  parentId String?
+
+  parent     Category?   @relation("CategoryToSubcategory", fields: [parentId], references: [id])
+  children   Category[]  @relation("CategoryToSubcategory")
+  painPoints PainPoint[]
+
+  @@map("reachy_categories")
+}
+
+enum SellerType {
+  SELLER
+  VENDOR
+  AGENCY
+  UNKNOWN
+}
+
+enum AdvertisingType {
+  SP
+  SB
+  SD
+  DSP
+  NONE
+  UNKNOWN
+}
+
+// ── Pain points ──────────────────────────────────────────────────────────
+
+model PainPoint {
+  id         String  @id @default(cuid())
+  rawItemId  String
+  categoryId String?
+
+  problem          String          @db.Text
+  subcategory      String?
+  sellerType       SellerType      @default(UNKNOWN)
+  advertisingType  AdvertisingType @default(UNKNOWN)
+  severity         Int // 1-5
+  frequency        Int // 1-5
+  emotion          String?
+  possibleSolution String?         @db.Text
+  quote            String?         @db.Text
+
+  opportunityScore Int // 0-100
+  scoreBreakdown   Json // { factor: { score, weight, rationale } }[]
+  confidenceScore  Float // 0-1
+
+  detectedAt DateTime @default(now())
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  rawItem            RawItem             @relation(fields: [rawItemId], references: [id], onDelete: Cascade)
+  category           Category?           @relation(fields: [categoryId], references: [id])
+  competitorMentions CompetitorMention[]
+  reportEntries      ReportPainPoint[]
+
+  @@index([opportunityScore])
+  @@index([detectedAt])
+  @@index([sellerType])
+  @@map("reachy_pain_points")
+}
+
+// ── Competitors ──────────────────────────────────────────────────────────
+
+model Competitor {
+  id            String    @id @default(cuid())
+  name          String
+  slug          String    @unique
+  website       String?
+  features      Json      @default("[]")
+  pricing       Json      @default("[]")
+  strengths     String?   @db.Text
+  weaknesses    String?   @db.Text
+  marketGaps    String?   @db.Text
+  latestUpdates Json      @default("[]")
+  lastCheckedAt DateTime?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  mentions CompetitorMention[]
+
+  @@map("reachy_competitors")
+}
+
+model CompetitorMention {
+  id           String @id @default(cuid())
+  competitorId String
+  painPointId  String
+  context      String @db.Text
+
+  competitor Competitor @relation(fields: [competitorId], references: [id], onDelete: Cascade)
+  painPoint  PainPoint  @relation(fields: [painPointId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+
+  @@unique([competitorId, painPointId])
+  @@map("reachy_competitor_mentions")
+}
+
+// ── Reports ──────────────────────────────────────────────────────────────
+
+enum ReportType {
+  WEEKLY
+  ON_DEMAND
+}
+
+enum ReportStatus {
+  PENDING
+  READY
+  FAILED
+}
+
+model Report {
+  id            String       @id @default(cuid())
+  type          ReportType
+  status        ReportStatus @default(PENDING)
+  requestedById String?
+  periodStart   DateTime
+  periodEnd     DateTime
+  sections      Json?
+  pdfPath       String?
+  emailedTo     Json         @default("[]")
+  error         String?
+  createdAt     DateTime     @default(now())
+  updatedAt     DateTime     @updatedAt
+
+  requestedBy User?             @relation(fields: [requestedById], references: [id])
+  entries     ReportPainPoint[]
+
+  @@map("reachy_reports")
+}
+
+model ReportPainPoint {
+  id          String @id @default(cuid())
+  reportId    String
+  painPointId String
+  rank        Int
+
+  report    Report    @relation(fields: [reportId], references: [id], onDelete: Cascade)
+  painPoint PainPoint @relation(fields: [painPointId], references: [id], onDelete: Cascade)
+
+  @@unique([reportId, painPointId])
+  @@map("reachy_report_pain_points")
+}
