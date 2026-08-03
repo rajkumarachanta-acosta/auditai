@@ -9,7 +9,7 @@ const logger = createLogger("cron:ingest");
 
 export const maxDuration = 300;
 
-export const POST = withErrorHandling(async (req: Request) => {
+const handler = withErrorHandling(async (req: Request) => {
   requireCronSecret(req);
 
   const ingestion = await runAllEnabledSources();
@@ -23,3 +23,9 @@ export const POST = withErrorHandling(async (req: Request) => {
 
   return NextResponse.json({ data: { ingestion, analysis } });
 });
+
+// Vercel Cron sends GET with an Authorization: Bearer $CRON_SECRET header
+// (auto-attached because the env var is named CRON_SECRET). POST is kept for
+// manual/external schedulers hitting this endpoint directly.
+export const GET = handler;
+export const POST = handler;

@@ -1,18 +1,12 @@
-import { createHash } from "node:crypto";
 import { prisma } from "../db";
 import { getConnector, listConnectors } from "../connectors/registry";
 import { createLogger } from "../logger";
+import { contentHashOf } from "../content-hash";
 import type { NormalizedItem } from "../connectors/types";
 
 const logger = createLogger("ingestion");
 
-function normalizeForHash(item: NormalizedItem): string {
-  return `${item.title.trim().toLowerCase()}\n${item.content.trim().toLowerCase()}`.replace(/\s+/g, " ");
-}
-
-export function contentHashOf(item: NormalizedItem): string {
-  return createHash("sha256").update(normalizeForHash(item)).digest("hex");
-}
+export { contentHashOf };
 
 export interface SourceRunResult {
   sourceKey: string;

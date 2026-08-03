@@ -2,5 +2,9 @@
   "framework": "nextjs",
   "buildCommand": "npm run build",
   "devCommand": "npm run dev",
-  "installCommand": "npm install"
+  "installCommand": "npm install",
+  "crons": [
+    { "path": "/api/reachy/cron/ingest", "schedule": "0 6 * * *" },
+    { "path": "/api/reachy/cron/report", "schedule": "0 7 * * 1" }
+  ]
 }

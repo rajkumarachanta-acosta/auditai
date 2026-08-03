@@ -155,3 +155,30 @@ export function buildScoreBreakdown(result: ScoringResult) {
     rationale: result[factor].rationale,
   }));
 }
+
+// ── Weekly report summary ─────────────────────────────────────────────
+
+export const summaryResultSchema = z.object({
+  executiveSummary: z.string(),
+  emergingTrends: z.array(z.string()),
+  featureIdeas: z.array(z.string()),
+  productsWorthBuilding: z.array(z.string()),
+  revenueOpportunities: z.array(z.string()),
+  recommendations: z.array(z.string()),
+});
+
+export type SummaryResult = z.infer<typeof summaryResultSchema>;
+
+export const SUMMARY_JSON_SCHEMA = {
+  type: "object",
+  properties: {
+    executiveSummary: { type: "string", description: "2-4 sentence executive summary of the period." },
+    emergingTrends: { type: "array", items: { type: "string" }, description: "Notable trends, grounded only in the provided data." },
+    featureIdeas: { type: "array", items: { type: "string" }, description: "Concrete feature ideas that would address top pain points." },
+    productsWorthBuilding: { type: "array", items: { type: "string" }, description: "Standalone product concepts worth building, if any." },
+    revenueOpportunities: { type: "array", items: { type: "string" }, description: "Where the revenue upside is, tied to specific pain points." },
+    recommendations: { type: "array", items: { type: "string" }, description: "Concrete next actions for leadership." },
+  },
+  required: ["executiveSummary", "emergingTrends", "featureIdeas", "productsWorthBuilding", "revenueOpportunities", "recommendations"],
+  additionalProperties: false,
+} as const;
