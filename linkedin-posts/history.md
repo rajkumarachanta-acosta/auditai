@@ -6,6 +6,32 @@ topic/angle and a different structural hook than any of them.
 
 ---
 
+## 2026-08-09 — Topic: ASIN portfolio triage as capital allocation (not ad optimization)
+
+**Angle tag:** `asin-portfolio`, `capital-allocation`, `framework`
+
+**Hook:** "You don't have an ad problem. You have a capital-allocation problem wearing an ad problem's costume."
+
+**Post:**
+
+You don't have an ad problem. You have a capital-allocation problem wearing an ad problem's costume.
+
+Every Amazon account I've audited has the same three buckets hiding in the data, and almost nobody looks at ad spend through them.
+
+Cash Cows — the ~20% of ASINs already producing 80% of revenue. Spend here shouldn't be "optimized" for ACOS. It should be pushed until the marginal dollar stops returning. Cutting these campaigns to hit an ACOS target is trading margin for a metric.
+
+Need Love — high revenue-per-view, low total revenue. Demand-proven products starving for exposure. This is the highest-ROI place to add budget, and it's almost always underfunded because nobody's watching for it.
+
+Reduce/Pause — spend with no revenue signal and no efficiency signal. This is the money everyone finds eventually, months too late.
+
+Three buckets. Most Amazon ad budgets are still allocated flat across all three, as if a dollar in each bucket is worth the same. It isn't.
+
+Before you approve next month's ad budget, ask your team one question: "Show me spend by bucket, not by campaign name." The campaign name tells you nothing about where the dollar is going. The bucket tells you everything.
+
+#AmazonAdvertising #Ecommerce #CapitalAllocation #DTC #FounderLed
+
+---
+
 ## 2026-08-02 — Topic: Q4 prep — inventory/ad-spend sync (timing risk)
 
 **Angle tag:** `q4-prep`, `inventory-ad-sync`, `story`
