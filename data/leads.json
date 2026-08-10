@@ -1,0 +1,318 @@
+[
+  {
+    "company": "Growve",
+    "website": "https://www.growve.com",
+    "country": "US",
+    "amazonPresence": [
+      {
+        "label": "Self-described as \"one of the largest multi-brand sellers on Amazon\"",
+        "source": "https://www.growve.com/",
+        "observedAt": "2026-08-10T15:48:42.438Z"
+      }
+    ],
+    "walmartPresence": [],
+    "person": {
+      "name": "Audrey McCarty",
+      "title": "EVP, Marketplace Operations",
+      "linkedinUrl": "https://www.linkedin.com/in/audrey-mccarty-76956046/"
+    },
+    "signals": [
+      {
+        "kind": "company",
+        "confidence": "confirmed",
+        "label": "17+ owned brands across nutrition, supplements, personal care, pet wellness — ~2,000 products",
+        "source": "https://www.growve.com/",
+        "observedAt": "2026-08-10T15:48:42.438Z"
+      },
+      {
+        "kind": "company",
+        "confidence": "confirmed",
+        "label": "$450MM+ revenue, 650+ employees, double-digit annual growth",
+        "source": "https://www.growve.com/",
+        "observedAt": "2026-08-10T15:48:42.438Z"
+      },
+      {
+        "kind": "company",
+        "confidence": "confirmed",
+        "label": "Also distributes through brick-and-mortar retail partners including Walmart, Kroger, Whole Foods, Sprouts, Natural Grocers (not confirmed as Walmart.com/Walmart Connect advertising presence)",
+        "source": "https://www.growve.com/",
+        "observedAt": "2026-08-10T15:48:42.438Z"
+      },
+      {
+        "kind": "pain",
+        "confidence": "confirmed",
+        "label": "Actively hiring Amazon PPC & Growth Specialists for the health/supplements/household brand portfolio",
+        "source": "https://www.glassdoor.com/job-listing/amazon-ppc-specialist-hybrid-growve-philippines-JV_KO0,28_KE29,47.htm?jl=1009726942405",
+        "observedAt": "2026-08-10T15:48:42.438Z"
+      },
+      {
+        "kind": "pain",
+        "confidence": "hypothesis",
+        "label": "Running consistent PPC bidding, keyword hygiene, and reporting across 17+ brands and ~2,000 SKUs is plausibly a workload bottleneck given the active hiring",
+        "source": "Inference from growve.com scale claims + open PPC reqs",
+        "observedAt": "2026-08-10T15:48:42.438Z"
+      }
+    ],
+    "trigger": {
+      "label": "Open Amazon PPC & Growth Specialist req, health/supplements/household brands",
+      "source": "https://www.glassdoor.com/job-listing/amazon-ppc-specialist-hybrid-growve-philippines-JV_KO0,28_KE29,47.htm?jl=1009726942405",
+      "observedAt": "2026-08-10T15:48:42.438Z",
+      "whyNow": "Growve is actively backfilling Amazon PPC capacity while running one of the largest multi-brand Amazon storefronts in health/wellness — a natural moment to show automation that reduces reliance on headcount scaling 1:1 with SKU count."
+    },
+    "productRelevance": "Campaign Optimization",
+    "outreachAngle": "Show how AI-driven bid/keyword optimization keeps PPC consistent across 17+ brands without headcount scaling linearly with SKU count.",
+    "problemHypothesis": "Hypothesis: managing PPC bidding, keyword hygiene, and reporting consistently across 17+ brands and ~2,000 SKUs may be creating a workload bottleneck — reflected in the active Amazon PPC hiring. Not confirmed with campaign-level data.",
+    "source": "WebSearch: Amazon PPC / Retail Media hiring signals, Aug 2026",
+    "id": "8463acad-1f85-40aa-8970-8ab75f92b2b1",
+    "score": {
+      "companyFit": 25,
+      "companyFitDetail": [
+        "Strong Amazon presence (+10)",
+        "Significant product catalog (+5)",
+        "Multiple brands/categories (+5)",
+        "Strong ecommerce presence (+5)"
+      ],
+      "painSignals": 25,
+      "painSignalsDetail": [
+        "Hiring retail-media specialists (+10)",
+        "Evidence of operational complexity (+5)",
+        "Large advertising operation (+10)"
+      ],
+      "buyerFit": 20,
+      "buyerFitDetail": [
+        "Decision-maker identified (+10)",
+        "Person directly responsible for ecommerce/retail media (+10)"
+      ],
+      "outreachOpportunity": 20,
+      "outreachOpportunityDetail": [
+        "Strong recent trigger (+10)",
+        "Specific personalization opportunity (+5)",
+        "Valid public contact information (+5)"
+      ],
+      "total": 90,
+      "tier": "A"
+    },
+    "status": "Draft Ready",
+    "dateAdded": "2026-08-10T15:48:42.438Z",
+    "weekAdded": "2026-W33",
+    "emailDraft": {
+      "body": "Hi Audrey,\n\nGrowve's Amazon PPC listings show you're running paid campaigns across 17+ brands and roughly 2,000 SKUs — and you're currently hiring to keep up with it.\n\nI'd guess keeping bids, keyword hygiene, and reporting consistent across that many product lines eats a lot of hours every week.\n\nI've been building AI workflows that automate that part of Amazon retail-media ops — audits, keyword intelligence, bulk campaign changes.\n\nWorth a quick look at what it catches on one of your brands?",
+      "wordCount": 82,
+      "valid": true,
+      "issues": [],
+      "subjectOptions": [
+        "Amazon PPC across 17+ brands",
+        "Question about Growve's Amazon ops"
+      ],
+      "gmailDraftId": "r-707590908888916396"
+    },
+    "linkedinDraft": {
+      "body": "Hi Audrey — saw Growve's hiring for Amazon PPC support across your 17+ brand portfolio. Keeping campaign hygiene and reporting consistent at that scale is rarely simple. I've been building AI workflows that automate a lot of that retail-media grind. Open to a quick exchange on how your team handles it today?",
+      "wordCount": 52,
+      "valid": true,
+      "issues": []
+    }
+  },
+  {
+    "company": "Newell Brands",
+    "website": "https://www.newellbrands.com",
+    "country": "US",
+    "amazonPresence": [
+      {
+        "label": "Multiple concurrent open roles dedicated to Amazon retail media: National Account Manager – Amazon, Associate Manager Retail Media – Amazon, Senior Director Media (Amazon retail-media experience valued, $209K-$255K)",
+        "source": "https://jobs.newellbrands.com/",
+        "observedAt": "2026-08-10T15:48:42.438Z"
+      }
+    ],
+    "walmartPresence": [],
+    "person": {
+      "name": "Tambi Younes",
+      "title": "VP, eCommerce",
+      "linkedinUrl": "https://www.linkedin.com/in/tambi/"
+    },
+    "signals": [
+      {
+        "kind": "company",
+        "confidence": "confirmed",
+        "label": "14 major brands (Rubbermaid, Sharpie, Graco, Coleman, Yankee Candle, Paper Mate, FoodSaver, Dymo, EXPO, Elmer's, Oster, NUK, Spontex, Campingaz) across writing instruments, baby gear, food storage, home fragrance, small appliances, outdoor, drinkware, commercial cleaning",
+        "source": "https://ir.newellbrands.com/corporate-profile/",
+        "observedAt": "2026-08-10T15:48:42.438Z"
+      },
+      {
+        "kind": "pain",
+        "confidence": "confirmed",
+        "label": "Five+ concurrent open retail-media roles: Amazon account management, media strategy, retail-media billing specialist, omnichannel activation, shopper marketing",
+        "source": "https://jobs.newellbrands.com/",
+        "observedAt": "2026-08-10T15:48:42.438Z"
+      },
+      {
+        "kind": "pain",
+        "confidence": "confirmed",
+        "label": "Dedicated \"Specialist - Retail Media Billing\" role manages billing across a Direct Bill model with retail-media agencies",
+        "source": "https://jobs.newellbrands.com/job/Chennai-Specialist-Retail-Media-Billing-Tami/1318944500/",
+        "observedAt": "2026-08-10T15:48:42.438Z"
+      },
+      {
+        "kind": "pain",
+        "confidence": "hypothesis",
+        "label": "The concurrent hiring wave and dedicated billing-reconciliation role suggest campaign execution and cross-agency reporting may be stretching the current team",
+        "source": "Inference from simultaneous open reqs on jobs.newellbrands.com",
+        "observedAt": "2026-08-10T15:48:42.438Z"
+      }
+    ],
+    "trigger": {
+      "label": "Simultaneous open reqs across Amazon account management, media strategy, and retail-media billing",
+      "source": "https://jobs.newellbrands.com/",
+      "observedAt": "2026-08-10T15:48:42.438Z",
+      "whyNow": "Newell has five-plus retail-media roles open at once right now, including a dedicated billing-reconciliation specialist — a concrete signal that retail-media operations are scaling faster than the team supporting them."
+    },
+    "productRelevance": "Retail Media Reporting",
+    "outreachAngle": "Focus on how automated retail-media reporting/reconciliation could cut the manual work behind the new billing-specialist hire.",
+    "problemHypothesis": "Hypothesis: simultaneous open reqs across Amazon account management, media strategy, and retail-media billing suggest campaign execution and cross-agency reporting reconciliation may be stretching the existing team. Not confirmed with internal headcount or spend data.",
+    "source": "WebSearch: Amazon/retail-media hiring signals at large multi-brand CPG companies, Aug 2026",
+    "id": "0ab500a0-1e42-4219-aeeb-869efae36695",
+    "score": {
+      "companyFit": 25,
+      "companyFitDetail": [
+        "Strong Amazon presence (+10)",
+        "Significant product catalog (+5)",
+        "Multiple brands/categories (+5)",
+        "Strong ecommerce presence (+5)"
+      ],
+      "painSignals": 25,
+      "painSignalsDetail": [
+        "Hiring retail-media specialists (+10)",
+        "Evidence of operational complexity (+5)",
+        "Large advertising operation (+10)"
+      ],
+      "buyerFit": 20,
+      "buyerFitDetail": [
+        "Decision-maker identified (+10)",
+        "Person directly responsible for ecommerce/retail media (+10)"
+      ],
+      "outreachOpportunity": 20,
+      "outreachOpportunityDetail": [
+        "Strong recent trigger (+10)",
+        "Specific personalization opportunity (+5)",
+        "Valid public contact information (+5)"
+      ],
+      "total": 90,
+      "tier": "A"
+    },
+    "status": "Draft Ready",
+    "dateAdded": "2026-08-10T15:48:42.438Z",
+    "weekAdded": "2026-W33",
+    "emailDraft": {
+      "body": "Hi Tambi,\n\nNewell's careers page currently lists several open retail-media roles at once — Amazon account management, media strategy, even a dedicated retail-media billing specialist.\n\nThat kind of hiring push across a dozen-plus brands usually means campaign execution and agency reporting are stretching the team thin right now.\n\nI've been building AI workflows that automate the campaign audit, keyword, and reporting work behind large Amazon retail-media programs.\n\nCurious if that would be useful to see against one brand?",
+      "wordCount": 78,
+      "valid": true,
+      "issues": [],
+      "subjectOptions": [
+        "Newell's Amazon retail-media hiring",
+        "Question about Newell's Amazon ops"
+      ],
+      "gmailDraftId": "r7773166952912545165"
+    },
+    "linkedinDraft": {
+      "body": "Hi Tambi — noticed Newell has several retail-media roles open right now, including Amazon account management and a dedicated billing specialist. That's a lot of hiring for one function. I've been building AI workflows that automate a good chunk of that operational work. Open to a quick exchange on how the team handles it today?",
+      "wordCount": 55,
+      "valid": true,
+      "issues": []
+    }
+  },
+  {
+    "company": "Garan, Incorporated",
+    "website": "https://www.garanimals.com",
+    "country": "US",
+    "amazonPresence": [
+      {
+        "label": "Garanimals sold online via Amazon (and Walmart.com)",
+        "source": "https://en.wikipedia.org/wiki/Garanimals",
+        "observedAt": "2026-08-10T15:48:42.438Z"
+      }
+    ],
+    "walmartPresence": [
+      {
+        "label": "Garanimals is a Walmart-distributed brand, sold extensively on Walmart.com",
+        "source": "https://www.walmart.com/brand/garanimals/10005825",
+        "observedAt": "2026-08-10T15:48:42.438Z"
+      }
+    ],
+    "person": {
+      "name": "Kristen Campolattaro",
+      "title": "Chief Marketing Officer, Children's Apparel",
+      "linkedinUrl": "https://www.linkedin.com/in/kristen-campolattaro-346a6"
+    },
+    "signals": [
+      {
+        "kind": "company",
+        "confidence": "confirmed",
+        "label": "Garanimals + 365 kids sub-line distributed across Walmart.com, Amazon, and select brick-and-mortar (Fred Meyer, Kroger, Burlington) — Berkshire Hathaway subsidiary since 2002",
+        "source": "https://en.wikipedia.org/wiki/Garanimals",
+        "observedAt": "2026-08-10T15:48:42.438Z"
+      },
+      {
+        "kind": "pain",
+        "confidence": "confirmed",
+        "label": "Actively hiring a Retail Media Director (Amazon and Walmart.com) at $200K, explicitly to establish the company's first in-house retail media function, reporting to the CMO",
+        "source": "https://www.mediabistro.com/jobs/3539799815-retail-media-director-amazon-and-walmartcom",
+        "observedAt": "2026-08-10T15:48:42.438Z"
+      },
+      {
+        "kind": "pain",
+        "confidence": "confirmed",
+        "label": "Role explicitly requires experience in apparel e-commerce and SKU-intensive categories, plus cross-functional coordination with merchandising and inventory teams",
+        "source": "https://www.mediabistro.com/jobs/3539799815-retail-media-director-amazon-and-walmartcom",
+        "observedAt": "2026-08-10T15:48:42.438Z"
+      },
+      {
+        "kind": "pain",
+        "confidence": "hypothesis",
+        "label": "Because there is no in-house retail media function yet, Amazon/Walmart campaign management is plausibly being run manually or through an external agency today",
+        "source": "Inference from job posting language: \"establishing the company's first in-house retail media function\"",
+        "observedAt": "2026-08-10T15:48:42.438Z"
+      }
+    ],
+    "trigger": {
+      "label": "New $200K Retail Media Director req (Amazon + Walmart.com), posted ~2 months before Aug 2026",
+      "source": "https://www.mediabistro.com/jobs/3539799815-retail-media-director-amazon-and-walmartcom",
+      "observedAt": "2026-08-10T15:48:42.438Z",
+      "whyNow": "Garan is standing up its first-ever in-house retail media function across Amazon and Walmart.com — the gap between today's (likely manual/agency-run) operations and that new hire landing is exactly the window to show what automation covers."
+    },
+    "productRelevance": "AI Retail Media Operations",
+    "outreachAngle": "Offer to show what an AI-run campaign audit looks like on Garanimals' current Amazon/Walmart campaigns while the in-house function is still being built out.",
+    "problemHypothesis": "Hypothesis: with no in-house retail media function until this hire lands, Amazon/Walmart campaign management may today be handled manually or via an external agency, creating reporting and hand-off overhead. Not confirmed — no visibility into Garan's current operating model.",
+    "source": "WebSearch: Amazon/Walmart retail-media hiring signals, Aug 2026",
+    "id": "2ee1d3ad-32e6-4d8f-b412-bd15fdc4c9a0",
+    "score": {
+      "companyFit": 20,
+      "companyFitDetail": [
+        "Significant product catalog (+5)",
+        "Multiple brands/categories (+5)",
+        "Amazon + Walmart presence (+5)",
+        "Strong ecommerce presence (+5)"
+      ],
+      "painSignals": 15,
+      "painSignalsDetail": [
+        "Hiring retail-media specialists (+10)",
+        "Evidence of operational complexity (+5)"
+      ],
+      "buyerFit": 20,
+      "buyerFitDetail": [
+        "Decision-maker identified (+10)",
+        "Person directly responsible for ecommerce/retail media (+10)"
+      ],
+      "outreachOpportunity": 20,
+      "outreachOpportunityDetail": [
+        "Strong recent trigger (+10)",
+        "Specific personalization opportunity (+5)",
+        "Valid public contact information (+5)"
+      ],
+      "total": 75,
+      "tier": "B"
+    },
+    "status": "Researched",
+    "dateAdded": "2026-08-10T15:48:42.438Z",
+    "weekAdded": "2026-W33"
+  }
+]
