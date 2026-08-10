@@ -318,7 +318,7 @@ export default function Home() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ question: text, computed: localComputed, audit: {
           score: audit.score, scoreLabel: audit.scoreLabel,
-          spendEfficiency: audit.spendEfficiency, structureQuality: audit.structureQuality,
+          keywordScore: audit.keywordScore, searchTermScore: audit.searchTermScore, budgetScore: audit.budgetScore,
           totalWaste: audit.totalWaste, totalOpportunity: audit.totalOpportunity,
           hasCampaignData: audit.hasCampaignData, hasSalesData: audit.hasSalesData,
           periodLabel: audit.periodLabel, summary: audit.summary,
@@ -654,10 +654,11 @@ export default function Home() {
                   <div className="sc-status" style={{ color: scoreColor(audit.score) }}>{audit.scoreLabel}</div>
                   <hr className="sc-divider" />
                   {audit.hasCampaignData && <>
-                    <div className="sc-row"><span className="lbl">Spend Efficiency</span><span style={{ color: scoreColor((audit.spendEfficiency/70)*100), fontWeight:700 }}>{audit.spendEfficiency}/70</span></div>
-                    <div className="sc-row"><span className="lbl">Structure Quality</span><span style={{ color: scoreColor((audit.structureQuality/30)*100), fontWeight:700 }}>{audit.structureQuality}/30</span></div>
+                    <div className="sc-row"><span className="lbl">Keyword Audit (40%)</span><span style={{ color: scoreColor(audit.keywordScore), fontWeight:700 }}>{audit.keywordScore}/100</span></div>
+                    <div className="sc-row"><span className="lbl">Search Term Audit (30%)</span><span style={{ color: scoreColor(audit.searchTermScore), fontWeight:700 }}>{audit.searchTermScore}/100</span></div>
+                    <div className="sc-row"><span className="lbl">Budget Audit (30%)</span><span style={{ color: scoreColor(audit.budgetScore), fontWeight:700 }}>{audit.budgetScore}/100</span></div>
                     <div className="sc-row"><span className="lbl">Total Waste</span><span style={{ color:"#ef4444", fontWeight:700 }}>{fmt$(audit.totalWaste)}</span></div>
-                    <div className="sc-row"><span className="lbl">Opportunity</span><span style={{ color:"#22c55e", fontWeight:700 }}>{fmt$(audit.totalOpportunity)}/mo</span></div>
+                    <div className="sc-row"><span className="lbl">Growth Opportunity</span><span style={{ color:"#22c55e", fontWeight:700 }}>{fmt$(audit.totalOpportunity)}</span></div>
                   </>}
                   {audit.hasSalesData && <>
                     <div className="sc-row"><span className="lbl">Total Revenue</span><span style={{ color:"#3b82d4", fontWeight:700 }}>{fmt$(audit.summary.totalOrderedRevenue)}</span></div>

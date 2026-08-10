@@ -1029,7 +1029,7 @@ function computePriority(audit: AuditResult): ComputedAnswer {
 }
 
 function computeScoreAnalysis(audit: AuditResult): ComputedAnswer {
-  const { score, scoreLabel, spendEfficiency, structureQuality, findings } = audit;
+  const { score, scoreLabel, keywordScore, searchTermScore, budgetScore, findings } = audit;
   const critical = findings.filter(f => f.severity === "critical");
   const high     = findings.filter(f => f.severity === "high");
   const potGain  = Math.min(27, critical.length * 5 + high.length * 2);
@@ -1039,8 +1039,9 @@ function computeScoreAnalysis(audit: AuditResult): ComputedAnswer {
     headline: `Health score ${score}/100 (${scoreLabel}) — can reach ~${Math.min(100, score + potGain)} by fixing critical issues`,
     facts: [
       `Overall score: ${score}/100 — ${scoreLabel}`,
-      `Spend efficiency: ${spendEfficiency}/70 points`,
-      `Structure quality: ${structureQuality}/30 points`,
+      `Keyword Audit: ${keywordScore}/100 (40% weight)`,
+      `Search Term Audit: ${searchTermScore}/100 (30% weight)`,
+      `Budget Audit: ${budgetScore}/100 (30% weight)`,
       `${critical.length} critical issues dragging the score`,
       `${high.length} high-priority issues`,
       `Waste ratio: ${fp(audit.summary.wasteRatio)} of spend is wasted`,

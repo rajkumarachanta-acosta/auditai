@@ -9,6 +9,11 @@ export interface Finding {
   impact: number; // $ for the reporting period
   severity: "critical" | "high" | "medium" | "low";
   action: string;
+  // VBA-fidelity fields, matching mod_FindingsStore's clsFinding model
+  module?: "Keyword Audit" | "Search Term Audit" | "Budget Audit" | "Benchmark Audit" | "Growth Opportunity";
+  confidence?: "High" | "Medium" | "Low" | "N/A";
+  scoringExempt?: boolean; // itemized child finding — excluded from the Recommendation ranking
+  impactType?: "Waste" | "Opportunity";
 }
 
 export interface AsinCohort {
@@ -238,8 +243,15 @@ export function runQuery(audit: AuditResult, question: string): QueryResult | nu
 export interface AuditResult {
   score: number;
   scoreLabel: string;
-  spendEfficiency: number;
-  structureQuality: number;
+  // Per-category health scores (0-100), matching mod_Scoring exactly: each category
+  // blends 70% spend efficiency + 30% structural quality, then the account Health Score
+  // is a weighted average (Keyword 40% / Search Term 30% / Budget 30%) across whichever
+  // categories have data.
+  keywordScore: number;
+  searchTermScore: number;
+  budgetScore: number;
+  growthOpportunity: number;    // $ conservative incremental upside (mod_GrowthOpportunity)
+  topActions: Finding[];        // ranked action list (mod_Recommendation)
   totalWaste: number;           // $ over reporting period
   totalOpportunity: number;     // $ monthly upside
   criticalCount: number;
@@ -341,11 +353,15 @@ function col(row: Record<string, unknown>, ...names: string[]): unknown {
 }
 
 // ── ASIN Cohort Analysis (Vendor Central data) ──
+// Matches mod_ASINAudit exactly: Cash Cow is a revenue-Pareto cutoff evaluated FIRST
+// (an ASIN inside the top-80%-of-cumulative-revenue band is always Cash Cow regardless
+// of CVR); Need More Love / Reduce-Pause require an actual traffic match (CVR computed,
+// not the -1 "no match" sentinel); the residual "Monitor" bucket is intentionally not
+// surfaced anywhere in the source tool's reporting, so it's simply excluded here too.
 function runAsinAudit(
   sales: Record<string, unknown>[],
   traffic: Record<string, unknown>[]
 ): AsinCohort[] {
-  // Build maps keyed by ASIN
   const salesMap: Record<string, { rev: number; units: number; returns: number; title: string; brand: string }> = {};
   for (const row of sales) {
     const asin = str(col(row, "ASIN"));
@@ -367,29 +383,48 @@ function runAsinAudit(
   if (allAsins.length === 0) return [];
 
   const totalRev = allAsins.reduce((s, a) => s + (salesMap[a]?.rev ?? 0), 0);
+  const paretoCutoff = totalRev * 0.8;
+
+  // Account benchmarks: avgCVR/avgPV computed only over ASINs with revenue>0 AND a traffic match.
+  let sumUnitsMatched = 0, sumPVMatched = 0, matchCount = 0;
+  for (const asin of allAsins) {
+    const item = salesMap[asin];
+    const pv = trafficMap[asin];
+    if (item.rev > 0 && pv !== undefined) {
+      sumUnitsMatched += item.units;
+      sumPVMatched += pv;
+      matchCount++;
+    }
+  }
+  const avgCVR = sumPVMatched > 0 ? sumUnitsMatched / sumPVMatched : 0;
+  const avgPV = matchCount > 0 ? sumPVMatched / matchCount : 0;
 
   const sorted = allAsins
-    .map(asin => ({ asin, ...salesMap[asin], pageViews: trafficMap[asin] ?? 0 }))
+    .map(asin => ({ asin, ...salesMap[asin], pageViews: trafficMap[asin] }))
     .sort((a, b) => b.rev - a.rev);
 
   const cohorts: AsinCohort[] = [];
   let cumulative = 0;
 
   for (const item of sorted) {
-    if (!item) continue;
     cumulative += item.rev;
-    const pct = totalRev > 0 ? cumulative / totalRev : 0;
-    const revenuePerView = item.pageViews > 0 ? item.rev / item.pageViews : 0;
+    const hasTrafficMatch = item.pageViews !== undefined;
+    const pageViews = item.pageViews ?? 0;
+    const cvr = hasTrafficMatch && pageViews > 0 ? item.units / pageViews : hasTrafficMatch ? 0 : -1; // -1 = no traffic match
+    const revenuePerView = pageViews > 0 ? item.rev / pageViews : 0;
     const returnRate = item.units > 0 ? Math.min(item.returns / item.units, 1) : 0;
 
-    let cohort: AsinCohort["cohort"];
-    if (pct <= 0.8 && item.rev > 0) {
+    let cohort: AsinCohort["cohort"] | "monitor";
+    if (cumulative <= paretoCutoff) {
       cohort = "cash_cow";
-    } else if (revenuePerView > 0 && item.rev < totalRev * 0.01) {
+    } else if (cvr >= 0 && cvr > avgCVR && pageViews < avgPV) {
       cohort = "need_love";
-    } else {
+    } else if (cvr >= 0 && cvr < avgCVR * 0.5) {
       cohort = "reduce_pause";
+    } else {
+      cohort = "monitor"; // matches VBA: computed but never surfaced in reporting
     }
+    if (cohort === "monitor") continue;
 
     cohorts.push({
       asin: item.asin,
@@ -398,7 +433,7 @@ function runAsinAudit(
       cohort,
       orderedRevenue: item.rev,
       orderedUnits: item.units,
-      pageViews: item.pageViews,
+      pageViews,
       revenuePerView,
       returnRate,
     });
@@ -440,11 +475,12 @@ function runKeywordAudit(campaign: Record<string, unknown>[]): Finding[] {
       noSalesSpend += spend;
       findings.push({
         id: `kw-nosales-${kwText}`,
-        category: "waste",
+        category: "waste", module: "Keyword Audit",
         title: `Zero-sales keyword: "${kwText}"`,
         detail: `Campaign: ${camp || "Unknown"} · Spend: $${spend.toFixed(0)} · $0 sales`,
         impact: spend,
         severity: spend > 200 ? "critical" : "high",
+        confidence: "N/A", scoringExempt: true, impactType: "Waste",
         action: `Pause "${kwText}" — spending $${spend.toFixed(0)} with zero return`,
       });
     }
@@ -454,11 +490,12 @@ function runKeywordAudit(campaign: Record<string, unknown>[]): Finding[] {
       highAcosSpend += spend;
       findings.push({
         id: `kw-acos-${kwText}`,
-        category: "waste",
+        category: "waste", module: "Keyword Audit",
         title: `High ACOS: "${kwText}" at ${(acos * 100).toFixed(0)}%`,
         detail: `Campaign: ${camp || "Unknown"} · ACOS ${(acos * 100).toFixed(0)}% vs ${(HIGH_ACOS * 100).toFixed(0)}% target`,
         impact: Math.max(0, spend - sales * HIGH_ACOS),
         severity: acos > 0.8 ? "critical" : "high",
+        confidence: "N/A", scoringExempt: true, impactType: "Waste",
         action: `Reduce bid by ${Math.min(70, Math.round((1 - HIGH_ACOS / acos) * 100))}% on "${kwText}"`,
       });
     }
@@ -469,11 +506,12 @@ function runKeywordAudit(campaign: Record<string, unknown>[]): Finding[] {
         lowCtrCount++;
         findings.push({
           id: `kw-ctr-${kwText}`,
-          category: "structure",
+          category: "structure", module: "Keyword Audit",
           title: `Low CTR: "${kwText}" at ${(ctr * 100).toFixed(2)}%`,
           detail: `${impr.toFixed(0)} impressions · CTR ${(ctr * 100).toFixed(2)}% vs ${(LOW_CTR * 100).toFixed(2)}% benchmark`,
           impact: 0,
           severity: "medium",
+          confidence: "N/A", scoringExempt: true, impactType: "Waste",
           action: `Review ad relevance for "${kwText}" or pause to stop wasting impressions`,
         });
       }
@@ -483,51 +521,75 @@ function runKeywordAudit(campaign: Record<string, unknown>[]): Finding[] {
       lowCvrCount++;
       findings.push({
         id: `kw-cvr-${kwText}`,
-        category: "structure",
+        category: "structure", module: "Keyword Audit",
         title: `Low CVR: "${kwText}" at ${(cvr * 100).toFixed(1)}%`,
         detail: `${clicks.toFixed(0)} clicks · CVR ${(cvr * 100).toFixed(1)}% vs ${(LOW_CVR * 100).toFixed(0)}% threshold`,
         impact: 0,
         severity: "medium",
+        confidence: "N/A", scoringExempt: true, impactType: "Waste",
         action: `Review listing relevance for "${kwText}" — getting clicks but not converting`,
       });
     }
   }
 
-  // Summary findings (these drive the score)
+  // Summary findings — one roll-up per pattern, non-scoringExempt so they drive the
+  // Recommendation ranking and Executive Summary critical-issue count.
   if (noSalesCount > 0) {
     findings.push({
-      id: "kw-summary-nosales",
-      category: "waste",
-      title: `${noSalesCount} keywords spent $${noSalesSpend.toFixed(0)} with zero sales`,
-      detail: `Budget burning with no return across ${noSalesCount} keywords. Full list above.`,
-      impact: noSalesSpend,
-      severity: "critical",
-      action: `Pause or reduce bids on all ${noSalesCount} zero-sales keywords immediately`,
+      id: "kw-summary-nosales", category: "waste", module: "Keyword Audit",
+      title: `High-spend / zero-sales keywords: ${noSalesCount} keywords spent $${noSalesSpend.toFixed(0)} with zero sales — budget burning with no return.`,
+      detail: `Budget burning with no return across ${noSalesCount} keywords. Full list in Detailed Findings.`,
+      impact: noSalesSpend, severity: "critical", confidence: "High", impactType: "Waste",
+      action: "Pause or sharply reduce bids on the itemized keywords. Full list in Detailed_Findings.",
     });
   }
   if (highAcosCount > 0) {
     findings.push({
-      id: "kw-summary-highacos",
-      category: "waste",
-      title: `${highAcosCount} keywords above ${(HIGH_ACOS * 100).toFixed(0)}% ACOS threshold ($${highAcosSpend.toFixed(0)} total spend)`,
+      id: "kw-summary-highacos", category: "waste", module: "Keyword Audit",
+      title: `High-ACOS keywords: ${highAcosCount} keywords spending $${highAcosSpend.toFixed(0)} above the ${(HIGH_ACOS * 100).toFixed(0)}% ACOS threshold.`,
       detail: `Overspending relative to sales return across ${highAcosCount} keywords.`,
-      impact: highAcosSpend * 0.4,
-      severity: "high",
+      impact: highAcosSpend, severity: "high", confidence: "High", impactType: "Waste",
       action: `Systematically reduce bids on ${highAcosCount} high-ACOS keywords`,
+    });
+  }
+  if (lowCtrCount > 0) {
+    findings.push({
+      id: "kw-summary-lowctr", category: "structure", module: "Keyword Audit",
+      title: `Low-CTR keywords: ${lowCtrCount} keywords with sufficient impressions are getting below-threshold click rates — possible relevance issues.`,
+      detail: `${lowCtrCount} keywords below the CTR benchmark.`,
+      impact: 0, severity: "medium", confidence: "Medium", impactType: "Waste",
+      action: "Review ad copy and listing relevance, or pause to stop wasting impressions.",
+    });
+  }
+  if (lowCvrCount > 0) {
+    findings.push({
+      id: "kw-summary-lowcvr", category: "structure", module: "Keyword Audit",
+      title: `Low-conversion keywords: ${lowCvrCount} keywords with sufficient clicks are converting below the ${(LOW_CVR * 100).toFixed(0)}% threshold.`,
+      detail: `${lowCvrCount} keywords below the CVR threshold.`,
+      impact: 0, severity: "medium", confidence: "Medium", impactType: "Waste",
+      action: "Review listing/landing page relevance for these keywords, or reduce bid.",
     });
   }
 
   return findings;
 }
 
-// ── Campaign Audit (Bulk file: Entity = "Campaign") ──
+// ── Budget Audit (Bulk file: Entity = "Campaign") ──
+// Matches mod_BudgetAudit: per-campaign overspending/wasted-spend/budget-increase-candidate
+// findings, plus one account-wide spend-concentration finding. Unlike Keyword/SearchTerm
+// Audit, none of these are scoringExempt in the source — each counts directly.
+const BUDGET_OVERSPEND_ACOS = 0.5;             // Budget_OverspendingACOS_Threshold
+const BUDGET_WASTE_MIN_SPEND = 1;              // Budget_WastedSpend_MinSpend
+const BUDGET_INCREASE_AVG_DAILY_PCT = 0.9;     // Budget_IncreaseCandidate_AvgDailyPct
+const BUDGET_INCREASE_EFFICIENT_ACOS = 0.3;    // Budget_IncreaseCandidate_EfficientACOS
+const BUDGET_CONCENTRATION_TOP_N = 5;          // Budget_ConcentrationTopN
+const BUDGET_CONCENTRATION_THRESHOLD_PCT = 0.4; // Budget_ConcentrationThresholdPct
+const REPORTING_PERIOD_DAYS = 30;              // ReportingPeriodDays
+
 function runCampaignAudit(campaign: Record<string, unknown>[]): Finding[] {
   const findings: Finding[] = [];
   const campaigns = campaign.filter(r => str(col(r, "Entity")) === "Campaign");
   if (!campaigns.length) return findings;
-
-  const WASTE_MIN_SPEND = 1;
-  const OVERSPEND_ACOS  = 0.5;
 
   let totalSpend = 0;
   const spendByCamp: Record<string, number> = {};
@@ -538,52 +600,68 @@ function runCampaignAudit(campaign: Record<string, unknown>[]): Finding[] {
     const sales  = num(col(c, "Sales"));
     const acos   = pct(col(c, "ACOS"));
     const budget = num(col(c, "Daily Budget"));
+    const state  = str(col(c, "State")).toLowerCase() || "enabled";
     const name   = str(col(c, "_ResolvedCampaignName", "Campaign Name (Informational only)", "Campaign Name")) || "Unknown Campaign";
     const key    = name.toLowerCase();
+    if (spend <= 0) continue; // matches VBA row-inclusion rule (spend<=0 skipped)
 
     totalSpend += spend;
     spendByCamp[key] = (spendByCamp[key] ?? 0) + spend;
     nameByKey[key]   = name;
+    const stateTag = state !== "enabled" ? ` [${state}]` : "";
 
-    if (spend > WASTE_MIN_SPEND && sales === 0) {
+    if (sales > 0 && acos > BUDGET_OVERSPEND_ACOS) {
       findings.push({
-        id: `camp-waste-${key}`,
-        category: "waste",
-        title: `Zero-sales campaign: "${name}"`,
-        detail: `Spend: $${spend.toFixed(0)} in reporting period · Zero attributed sales`,
-        impact: spend,
-        severity: "critical",
-        action: `Pause "${name}" — zero return on $${spend.toFixed(0)} spend`,
+        id: `camp-acos-${key}`, category: "waste", module: "Budget Audit",
+        title: `Overspending campaign: "${name}" (ACOS ${(acos * 100).toFixed(0)}% vs ${(BUDGET_OVERSPEND_ACOS * 100).toFixed(0)}% threshold, $${spend.toFixed(0)} spend)${stateTag}`,
+        detail: `ACOS ${(acos * 100).toFixed(0)}% vs ${(BUDGET_OVERSPEND_ACOS * 100).toFixed(0)}% threshold · Spend $${spend.toFixed(0)} · Sales $${sales.toFixed(0)}`,
+        impact: spend, severity: "critical", confidence: "N/A",
+        action: state === "enabled"
+          ? "Reduce bids or pause underperforming keywords/targets within this campaign to bring ACOS back in line."
+          : `Already ${state} — confirm intentional; spend still counts toward this period's results.`,
       });
     }
 
-    if (sales > 0 && acos > OVERSPEND_ACOS) {
+    if (spend > BUDGET_WASTE_MIN_SPEND && sales === 0) {
       findings.push({
-        id: `camp-acos-${key}`,
-        category: "waste",
-        title: `High-ACOS campaign: "${name}" at ${(acos * 100).toFixed(0)}%`,
-        detail: `ACOS ${(acos * 100).toFixed(0)}% vs 50% ceiling · Spend $${spend.toFixed(0)} · Sales $${sales.toFixed(0)}`,
-        impact: Math.max(0, spend - sales * OVERSPEND_ACOS),
-        severity: "high",
-        action: `Review and reduce bids in "${name}" to bring ACOS under 50%`,
+        id: `camp-waste-${key}`, category: "waste", module: "Budget Audit",
+        title: `Wasted campaign spend: "${name}" ($${spend.toFixed(0)} spend, $0 sales)${stateTag}`,
+        detail: `Spend: $${spend.toFixed(0)} in reporting period · Zero attributed sales`,
+        impact: spend, severity: "critical", confidence: "N/A",
+        action: state === "enabled"
+          ? "Investigate immediately — this campaign is spending with zero return."
+          : `Already ${state} — confirm intentional; spend still counts toward this period's waste.`,
       });
+    }
+
+    if (budget > 0 && sales > 0 && acos > 0 && acos <= BUDGET_INCREASE_EFFICIENT_ACOS && state === "enabled") {
+      const avgDailySpend = spend / REPORTING_PERIOD_DAYS;
+      const avgDailyPct = avgDailySpend / budget;
+      if (avgDailyPct >= BUDGET_INCREASE_AVG_DAILY_PCT) {
+        findings.push({
+          id: `camp-increase-${key}`, category: "opportunity", module: "Budget Audit",
+          title: `Budget increase candidate: "${name}" is efficient (ACOS ${(acos * 100).toFixed(0)}%) and averaging ${(avgDailyPct * 100).toFixed(0)}% of its daily budget over the period`,
+          detail: `ACOS ${(acos * 100).toFixed(0)}% · Averaging ${(avgDailyPct * 100).toFixed(0)}% of $${budget.toFixed(0)}/day budget`,
+          impact: spend, severity: "medium", confidence: "Medium", impactType: "Opportunity",
+          action: "Consider testing a higher daily budget — this campaign performs efficiently and is consistently using most of its allocated budget. Directional signal, not a confirmed cap (requires daily pacing data to confirm).",
+        });
+      }
     }
   }
 
-  // Spend concentration risk
+  // Spend concentration risk (account-wide, top N campaigns by spend)
   const sorted = Object.entries(spendByCamp).sort((a, b) => b[1] - a[1]);
-  if (sorted.length >= 2 && totalSpend > 0) {
-    const top2spend = (sorted[0]?.[1] ?? 0) + (sorted[1]?.[1] ?? 0);
-    const pct = top2spend / totalSpend;
-    if (pct > 0.6) {
+  if (totalSpend > 0) {
+    const topN = sorted.slice(0, Math.min(BUDGET_CONCENTRATION_TOP_N, sorted.length));
+    const topNSpend = topN.reduce((s, [, v]) => s + v, 0);
+    const topNPct = topNSpend / totalSpend;
+    if (topNPct >= BUDGET_CONCENTRATION_THRESHOLD_PCT) {
       findings.push({
-        id: "camp-concentration",
-        category: "structure",
-        title: `Spend concentration: top 2 campaigns = ${(pct * 100).toFixed(0)}% of total spend`,
-        detail: `"${nameByKey[sorted[0]?.[0] ?? ""] ?? ""}" + "${nameByKey[sorted[1]?.[0] ?? ""] ?? ""}" dominate the budget — single point of failure`,
-        impact: 0,
-        severity: "medium",
-        action: `Redistribute budget across more campaigns to reduce risk`,
+        id: "camp-concentration", category: "structure", module: "Budget Audit",
+        title: `Spend concentration risk: top ${topN.length} campaigns account for ${(topNPct * 100).toFixed(0)}% of total account spend ($${topNSpend.toFixed(0)} of $${totalSpend.toFixed(0)})`,
+        detail: topN.map(([k]) => nameByKey[k]).join(", "),
+        impact: topNSpend, severity: "medium", confidence: "High",
+        action: "Account performance is heavily dependent on a small number of campaigns. Review diversification and contingency if any of these underperform.",
       });
     }
   }
@@ -592,47 +670,205 @@ function runCampaignAudit(campaign: Record<string, unknown>[]): Finding[] {
 }
 
 // ── Search Term Audit (Bulk file: SP Search Term Report sheet) ──
-function runSearchTermAudit(searchTerm: Record<string, unknown>[]): Finding[] {
+// Matches mod_SearchTermAudit: 6 patterns (waste split into negated-elsewhere vs never-negated,
+// underfunded high-CVR converters, converting terms never added as any keyword, exact-match
+// expansion, high-CTR-zero-conversion), cross-referenced against _RAW_Campaign for existing
+// keywords/negatives, plus one severity-tiered summary finding per pattern.
+const ST_NEG_MIN_SPEND = 5;            // SearchTerm_NegativeKW_MinSpend
+const ST_EXPANSION_MIN_ORDERS = 10;    // SearchTerm_Expansion_MinOrders
+const ST_EXPANSION_MIN_CVR = 0.25;     // SearchTerm_Expansion_MinCVR
+const ST_UNDERFUNDED_CVR_MULT = 2;     // SearchTerm_Underfunded_CVRMultiplier
+const ST_UNDERFUNDED_MIN_CLICKS = 5;   // SearchTerm_Underfunded_MinClicks
+const ST_UNDERFUNDED_MAX_CLICKS = 15;  // SearchTerm_Underfunded_MaxClicks
+const ST_NEVER_ADDED_MIN_ORDERS = 3;   // SearchTerm_NeverAdded_MinOrders
+const ST_HIGH_CTR_MULT = 2;            // SearchTerm_HighCTRNoConv_CTRMultiplier
+const ST_HIGH_CTR_MIN_CLICKS = 15;     // SearchTerm_HighCTRNoConv_MinClicks
+const ST_WASTE_CRITICAL_DOLLAR = 500;
+const ST_WASTE_HIGH_DOLLAR = 100;
+const ST_NEVERADDED_CRITICAL_DOLLAR = 50000;
+const ST_NEVERADDED_HIGH_DOLLAR = 10000;
+
+function tierSeverityByDollar(amount: number, critical: number, high: number): Finding["severity"] {
+  if (amount >= critical) return "critical";
+  if (amount >= high) return "high";
+  return "medium";
+}
+
+function runSearchTermAudit(searchTerm: Record<string, unknown>[], campaign: Record<string, unknown>[]): Finding[] {
   const findings: Finding[] = [];
   if (!searchTerm.length) return findings;
 
-  const totalClicks = searchTerm.reduce((s, r) => s + num(col(r, "Clicks")), 0);
-  const totalOrders = searchTerm.reduce((s, r) => s + num(col(r, "Orders", "Attributed Conversions 14d")), 0);
-  const avgCvr = totalClicks > 0 ? totalOrders / totalClicks : 0;
+  // Cross-reference sets from _RAW_Campaign
+  const existingKeywords = new Set<string>();
+  const existingNegatives = new Set<string>();
+  for (const row of campaign) {
+    const entity = str(col(row, "Entity"));
+    const kw = str(col(row, "Keyword Text")).toLowerCase().trim();
+    if (!kw) continue;
+    if (entity === "Keyword") existingKeywords.add(kw);
+    else if (entity === "Negative Keyword" || entity === "Campaign Negative Keyword") existingNegatives.add(kw);
+  }
+  // exactSet is built from the Search Term Report's OWN Match Type column, not _RAW_Campaign
+  const exactSet = new Set<string>();
+  for (const row of searchTerm) {
+    const mt = str(col(row, "Match Type")).toLowerCase();
+    if (mt === "exact") exactSet.add(str(col(row, "Customer Search Term", "Search Term", "Query")).toLowerCase().trim());
+  }
+
+  // Account baselines — volume-weighted, over ALL rows (not just findings-eligible ones)
+  let sumClicksAll = 0, sumOrdersAll = 0, sumImprAll = 0;
+  for (const row of searchTerm) {
+    sumClicksAll += num(col(row, "Clicks"));
+    sumOrdersAll += num(col(row, "Orders", "Attributed Conversions 14d"));
+    sumImprAll += num(col(row, "Impressions"));
+  }
+  const accountAvgCVR = sumClicksAll > 0 ? sumOrdersAll / sumClicksAll : 0;
+  const accountAvgCTR = sumImprAll > 0 ? sumClicksAll / sumImprAll : 0;
+
+  let totalWasteSpend = 0, totalWasteCount = 0, itemizedNegCount = 0, neverNegatedCount = 0, negScopeGapCount = 0;
+  let underfundedSalesTotal = 0, neverAddedSalesTotal = 0, exactExpansionSalesTotal = 0;
+  let underfundedCount = 0, neverAddedCount = 0, exactExpansionCount = 0, highCTRCount = 0;
 
   for (const row of searchTerm) {
-    const term   = str(col(row, "Customer Search Term", "Search Term", "Query"));
-    const spend  = num(col(row, "Spend"));
-    const sales  = num(col(row, "Sales", "Attributed Sales 14d"));
-    const clicks = num(col(row, "Clicks"));
-    const orders = num(col(row, "Orders", "Attributed Conversions 14d"));
-    const cvr    = clicks > 0 ? orders / clicks : 0;
-
+    const term = str(col(row, "Customer Search Term", "Search Term", "Query"));
     if (!term || term === "Customer Search Term") continue;
+    const termLower = term.toLowerCase().trim();
+    const spend = num(col(row, "Spend"));
+    const sales = num(col(row, "Sales", "Attributed Sales 14d"));
+    const clicks = num(col(row, "Clicks"));
+    const impr = num(col(row, "Impressions"));
+    const orders = num(col(row, "Orders", "Attributed Conversions 14d"));
+    const cvr = clicks > 0 ? orders / clicks : 0;
+    const ctr = impr > 0 ? clicks / impr : 0;
 
-    if (spend > 30 && sales === 0) {
+    // (a) Wasted spend, split by negative status
+    if (spend > 0 && orders === 0 && sales === 0) {
+      totalWasteSpend += spend;
+      totalWasteCount++;
+      if (spend > ST_NEG_MIN_SPEND) {
+        itemizedNegCount++;
+        const isNegatedElsewhere = existingNegatives.has(termLower);
+        if (isNegatedElsewhere) {
+          negScopeGapCount++;
+          findings.push({
+            id: `st-negscope-${termLower.slice(0, 40)}`, category: "waste", module: "Search Term Audit",
+            title: `Negative scope gap: "${term}" is already negated elsewhere in the account but still spending here ($${spend.toFixed(0)}, 0 orders)`,
+            detail: `$${spend.toFixed(0)} spend · 0 orders · already negated in another campaign/ad group`,
+            impact: spend, severity: "critical", confidence: "High", scoringExempt: true, impactType: "Waste",
+            action: "This term was already identified as bad and negated in another campaign/ad group — copy that negative here too.",
+          });
+        } else {
+          neverNegatedCount++;
+          findings.push({
+            id: `st-waste-${termLower.slice(0, 40)}`, category: "waste", module: "Search Term Audit",
+            title: `Wasted spend — add as negative: "${term}" ($${spend.toFixed(0)} spend, 0 orders, 0 sales, ${clicks.toFixed(0)} clicks)`,
+            detail: `$${spend.toFixed(0)} spend · 0 orders · 0 sales · ${clicks.toFixed(0)} clicks`,
+            impact: spend, severity: "critical", confidence: "High", scoringExempt: true, impactType: "Waste",
+            action: `Add "${term}" as a negative keyword to stop wasted spend.`,
+          });
+        }
+      }
+    }
+
+    // (b) Underfunded high-CVR converters
+    if (orders > 0 && clicks >= ST_UNDERFUNDED_MIN_CLICKS && clicks <= ST_UNDERFUNDED_MAX_CLICKS && accountAvgCVR > 0 && cvr > accountAvgCVR * ST_UNDERFUNDED_CVR_MULT) {
+      underfundedSalesTotal += sales;
+      underfundedCount++;
       findings.push({
-        id: `st-waste-${term.slice(0, 40)}`,
-        category: "waste",
-        title: `Wasted search term: "${term}"`,
-        detail: `$${spend.toFixed(0)} spend · zero sales · irrelevant traffic`,
-        impact: spend,
-        severity: spend > 100 ? "critical" : "high",
-        action: `Add "${term}" as negative exact keyword across relevant campaigns`,
+        id: `st-underfunded-${termLower.slice(0, 40)}`, category: "opportunity", module: "Search Term Audit",
+        title: `Underfunded high-converting term: "${term}" (CVR ${(cvr * 100).toFixed(1)}% vs account avg ${(accountAvgCVR * 100).toFixed(1)}%, only ${clicks.toFixed(0)} clicks)`,
+        detail: `CVR ${(cvr * 100).toFixed(1)}% vs account avg ${(accountAvgCVR * 100).toFixed(1)}% · ${clicks.toFixed(0)} clicks`,
+        impact: sales, severity: "medium", confidence: "N/A", scoringExempt: true, impactType: "Opportunity",
+        action: `Increase bid/budget on "${term}" — converting well on very little traffic.`,
       });
     }
 
-    if (orders > 1 && cvr > avgCvr * 2 && spend < 50) {
+    // (c) Converting term never added as ANY keyword
+    if (orders >= ST_NEVER_ADDED_MIN_ORDERS && !existingKeywords.has(termLower)) {
+      neverAddedSalesTotal += sales;
+      neverAddedCount++;
       findings.push({
-        id: `st-opp-${term.slice(0, 40)}`,
-        category: "opportunity",
-        title: `High-CVR underfunded term: "${term}"`,
-        detail: `CVR ${(cvr * 100).toFixed(1)}% (2x account avg) · Only $${spend.toFixed(0)} spend · Huge upside`,
-        impact: spend * 4,
-        severity: "high",
-        action: `Add "${term}" as exact-match keyword and increase bid`,
+        id: `st-neveradded-${termLower.slice(0, 40)}`, category: "opportunity", module: "Search Term Audit",
+        title: `Converting term never added as a keyword: "${term}" (${orders.toFixed(0)} orders, $${sales.toFixed(0)} sales, currently only reachable via Auto/Broad/Phrase overflow)`,
+        detail: `${orders.toFixed(0)} orders · $${sales.toFixed(0)} sales · not targeted directly`,
+        impact: sales, severity: "high", confidence: "N/A", scoringExempt: true, impactType: "Opportunity",
+        action: `Add "${term}" as a dedicated keyword (start with exact match).`,
       });
     }
+
+    // (d) Exact-match expansion opportunity — independent of keyword-text existence, gated
+    // only by whether THIS search term itself was already targeted by an exact-match keyword.
+    if (orders >= ST_EXPANSION_MIN_ORDERS && cvr >= ST_EXPANSION_MIN_CVR && !exactSet.has(termLower)) {
+      exactExpansionSalesTotal += sales;
+      exactExpansionCount++;
+      findings.push({
+        id: `st-exactexp-${termLower.slice(0, 40)}`, category: "opportunity", module: "Search Term Audit",
+        title: `Exact-match expansion opportunity: "${term}" (${orders.toFixed(0)} orders, CVR ${(cvr * 100).toFixed(1)}%, $${sales.toFixed(0)} sales)`,
+        detail: `${orders.toFixed(0)} orders · CVR ${(cvr * 100).toFixed(1)}% · $${sales.toFixed(0)} sales`,
+        impact: sales, severity: "medium", confidence: "N/A", scoringExempt: true, impactType: "Opportunity",
+        action: `Promote "${term}" to a dedicated Exact-match keyword to protect and scale this converter.`,
+      });
+    }
+
+    // (e) High CTR, zero conversions
+    if (orders === 0 && clicks >= ST_HIGH_CTR_MIN_CLICKS && accountAvgCTR > 0 && ctr > accountAvgCTR * ST_HIGH_CTR_MULT) {
+      highCTRCount++;
+      findings.push({
+        id: `st-highctr-${termLower.slice(0, 40)}`, category: "structure", module: "Search Term Audit",
+        title: `High engagement, no conversion: "${term}" (CTR ${(ctr * 100).toFixed(2)}% vs account avg ${(accountAvgCTR * 100).toFixed(2)}%, ${clicks.toFixed(0)} clicks, 0 orders)`,
+        detail: `CTR ${(ctr * 100).toFixed(2)}% vs account avg ${(accountAvgCTR * 100).toFixed(2)}% · ${clicks.toFixed(0)} clicks · 0 orders`,
+        impact: spend, severity: "medium", confidence: "N/A", scoringExempt: true, impactType: "Waste",
+        action: "Strong click appeal but no sales — likely a listing/price/relevance mismatch rather than a targeting problem. Review product page for this search intent.",
+      });
+    }
+  }
+
+  if (totalWasteCount > 0) {
+    findings.push({
+      id: "st-summary-waste", category: "waste", module: "Search Term Audit",
+      title: `Search term waste summary: ${totalWasteCount} search terms spent $${totalWasteSpend.toFixed(0)} total with zero orders/sales (any amount). Of these, ${itemizedNegCount} spent over the itemization floor and are listed individually below: ${neverNegatedCount} never negated, ${negScopeGapCount} negated elsewhere but still bleeding.`,
+      detail: `${totalWasteCount} terms · $${totalWasteSpend.toFixed(0)} total waste`,
+      impact: totalWasteSpend, severity: tierSeverityByDollar(totalWasteSpend, ST_WASTE_CRITICAL_DOLLAR, ST_WASTE_HIGH_DOLLAR),
+      confidence: "High", impactType: "Waste",
+      action: `Add negatives for all ${neverNegatedCount} never-negated wasted terms; fix scope for the ${negScopeGapCount} negated-elsewhere terms.`,
+    });
+  }
+  if (neverAddedCount > 0) {
+    findings.push({
+      id: "st-summary-neveradded", category: "opportunity", module: "Search Term Audit",
+      title: `Never-added-as-keyword summary: ${neverAddedCount} converting search terms have no dedicated keyword ($${neverAddedSalesTotal.toFixed(0)} sales at stake)`,
+      detail: `${neverAddedCount} terms · $${neverAddedSalesTotal.toFixed(0)} sales`,
+      impact: neverAddedSalesTotal, severity: tierSeverityByDollar(neverAddedSalesTotal, ST_NEVERADDED_CRITICAL_DOLLAR, ST_NEVERADDED_HIGH_DOLLAR),
+      confidence: "High", impactType: "Opportunity",
+      action: "Add dedicated keywords for these proven converters. Full list in Detailed Findings.",
+    });
+  }
+  if (underfundedCount > 0) {
+    findings.push({
+      id: "st-summary-underfunded", category: "opportunity", module: "Search Term Audit",
+      title: `Underfunded converters summary: ${underfundedCount} high-CVR search terms are getting very little traffic ($${underfundedSalesTotal.toFixed(0)} sales at stake)`,
+      detail: `${underfundedCount} terms · $${underfundedSalesTotal.toFixed(0)} sales`,
+      impact: underfundedSalesTotal, severity: "medium", confidence: "Medium", impactType: "Opportunity",
+      action: "Raise bids/budget on these underfunded high-CVR terms.",
+    });
+  }
+  if (exactExpansionCount > 0) {
+    findings.push({
+      id: "st-summary-exactexpansion", category: "opportunity", module: "Search Term Audit",
+      title: `Exact-match expansion summary: ${exactExpansionCount} strong-converting search terms aren't Exact-match keywords yet ($${exactExpansionSalesTotal.toFixed(0)} sales at stake)`,
+      detail: `${exactExpansionCount} terms · $${exactExpansionSalesTotal.toFixed(0)} sales`,
+      impact: exactExpansionSalesTotal, severity: "medium", confidence: "Medium", impactType: "Opportunity",
+      action: "Promote these to dedicated Exact-match keywords.",
+    });
+  }
+  if (highCTRCount > 0) {
+    findings.push({
+      id: "st-summary-highctr", category: "structure", module: "Search Term Audit",
+      title: `High-CTR-no-conversion summary: ${highCTRCount} search terms get above-average clicks but never convert`,
+      detail: `${highCTRCount} terms`,
+      impact: 0, severity: "medium", confidence: "Medium", impactType: "Waste",
+      action: "Review listing/pricing relevance for these search intents.",
+    });
   }
 
   return findings;
@@ -671,26 +907,129 @@ function runAsinOpportunities(cohorts: AsinCohort[]): Finding[] {
   return findings;
 }
 
-// ── Score Calculation ──
-function calculateScore(
-  findings: Finding[],
-  summary: AuditSummary
-): { score: number; spendEfficiency: number; structureQuality: number } {
-  let spendEfficiency = 70;
-  if (summary.totalSpend > 0) {
-    spendEfficiency -= Math.min(30, summary.wasteRatio * 100);
-    spendEfficiency -= Math.min(15, Math.max(0, (summary.avgAcos - 0.3) * 50));
+// ── Scoring (mod_Scoring) ──
+// Health Score is a HYBRID of 70% spend efficiency + 30% structural quality per category
+// (Keyword/Search Term/Budget), then a weighted average across categories (0.4/0.3/0.3).
+// Rate-based (not flat-deduction), so the score is neutral to account size. Categories with
+// zero spend are excluded from both the weighted numerator and denominator (their weight is
+// effectively redistributed proportionally among the remaining categories).
+interface ScoringResult {
+  healthScore: number;
+  riskLevel: "Excellent" | "Good" | "Needs Improvement" | "At Risk";
+  keywordScore: number;
+  searchTermScore: number;
+  budgetScore: number;
+  wastedSpend: number;
+}
+
+function clamp100(v: number): number { return Math.max(0, Math.min(100, v)); }
+
+function runScoring(campaign: Record<string, unknown>[], searchTerm: Record<string, unknown>[], ctrGap: number): ScoringResult {
+  // KEYWORD CATEGORY
+  let kwTotalSpend = 0, kwTotalCount = 0, kwCritSpend = 0, kwHighSpend = 0, kwProblemCount = 0;
+  for (const kw of campaign) {
+    if (str(col(kw, "Entity")) !== "Keyword") continue;
+    const spend = num(col(kw, "Spend"));
+    if (spend <= 0) continue;
+    const sales = num(col(kw, "Sales"));
+    const acos = pct(col(kw, "ACOS"));
+    kwTotalSpend += spend;
+    kwTotalCount++;
+    if (spend > 30 && sales === 0) { kwCritSpend += spend; kwProblemCount++; }
+    else if (sales > 0 && acos > 0.4) { kwHighSpend += spend * 0.5; kwProblemCount++; }
   }
-  spendEfficiency = Math.max(0, Math.round(spendEfficiency));
+  let kwEfficiency = kwTotalSpend > 0 ? (1 - (kwCritSpend + kwHighSpend) / kwTotalSpend) * 100 : 100;
+  const kwStructural = kwTotalCount > 0 ? (1 - kwProblemCount / kwTotalCount) * 100 : 100;
+  kwEfficiency = clamp100(kwEfficiency + ctrGap * 10);
+  const keywordScore = clamp100(Math.round(kwEfficiency * 0.7 + kwStructural * 0.3));
 
-  let structureQuality = 30;
-  const criticals = findings.filter(f => f.severity === "critical").length;
-  const structs   = findings.filter(f => f.category === "structure").length;
-  structureQuality -= Math.min(15, criticals * 3);
-  structureQuality -= Math.min(10, structs   * 2);
-  structureQuality = Math.max(0, Math.round(structureQuality));
+  // SEARCH TERM CATEGORY
+  const existingKW = new Set<string>();
+  for (const r of campaign) if (str(col(r, "Entity")) === "Keyword") existingKW.add(str(col(r, "Keyword Text")).toLowerCase().trim());
+  let stTotalSpend = 0, stWasteSpend = 0, stConverterCount = 0, stUncoveredCount = 0;
+  for (const r of searchTerm) {
+    const term = str(col(r, "Customer Search Term", "Search Term", "Query"));
+    if (!term || term === "Customer Search Term") continue;
+    const spend = num(col(r, "Spend"));
+    const sales = num(col(r, "Sales", "Attributed Sales 14d"));
+    const orders = num(col(r, "Orders", "Attributed Conversions 14d"));
+    stTotalSpend += spend;
+    if (spend > ST_NEG_MIN_SPEND && orders === 0 && sales === 0) stWasteSpend += spend;
+    if (orders >= ST_NEVER_ADDED_MIN_ORDERS) {
+      stConverterCount++;
+      if (!existingKW.has(term.toLowerCase().trim())) stUncoveredCount++;
+    }
+  }
+  const stEfficiency = stTotalSpend > 0 ? clamp100((1 - stWasteSpend / stTotalSpend) * 100) : 100;
+  const stStructural = stConverterCount > 0 ? clamp100((1 - stUncoveredCount / stConverterCount) * 100) : 100;
+  const searchTermScore = clamp100(Math.round(stEfficiency * 0.7 + stStructural * 0.3));
 
-  return { score: spendEfficiency + structureQuality, spendEfficiency, structureQuality };
+  // BUDGET CATEGORY (efficiency-only — no structural component in the source)
+  let campTotalSpend = 0, campWaste = 0, campOverspend = 0;
+  for (const r of campaign) {
+    if (str(col(r, "Entity")) !== "Campaign") continue;
+    const spend = num(col(r, "Spend"));
+    if (spend <= 0) continue;
+    const sales = num(col(r, "Sales"));
+    const acos = pct(col(r, "ACOS"));
+    campTotalSpend += spend;
+    if (spend > BUDGET_WASTE_MIN_SPEND && sales === 0) campWaste += spend;
+    else if (sales > 0 && acos > BUDGET_OVERSPEND_ACOS) campOverspend += spend * 0.5;
+  }
+  const budgetScore = campTotalSpend > 0 ? clamp100(Math.round((1 - (campWaste + campOverspend) / campTotalSpend) * 100)) : 100;
+
+  const wastedSpend = stWasteSpend + kwCritSpend + campWaste;
+
+  // FINAL WEIGHTED SCORE — categories with zero spend excluded from both sums
+  const kwHasData = kwTotalSpend > 0, stHasData = stTotalSpend > 0, budHasData = campTotalSpend > 0;
+  const weights = { kw: 0.4, st: 0.3, bud: 0.3 };
+  let totalWeight = 0, weightedSum = 0;
+  if (kwHasData) { totalWeight += weights.kw; weightedSum += keywordScore * weights.kw; }
+  if (stHasData) { totalWeight += weights.st; weightedSum += searchTermScore * weights.st; }
+  if (budHasData) { totalWeight += weights.bud; weightedSum += budgetScore * weights.bud; }
+  const healthScore = totalWeight > 0 ? clamp100(Math.round(weightedSum / totalWeight)) : 0;
+
+  const riskLevel: ScoringResult["riskLevel"] =
+    healthScore >= 90 ? "Excellent" :
+    healthScore >= 75 ? "Good" :
+    healthScore >= 60 ? "Needs Improvement" : "At Risk";
+
+  return { healthScore, riskLevel, keywordScore, searchTermScore, budgetScore, wastedSpend };
+}
+
+// ── Growth Opportunity (mod_GrowthOpportunity) ──
+// Always defensible: current_sales_at_stake × upliftFactor × confidenceHaircut, reading the
+// Impact values off the three Search Term Audit summary findings already produced above.
+// Component D (benchmark-gap growth) is permanently 0 in the source — an explicitly
+// documented dead branch that would need total-account-sales data not carried here.
+const GROWTH_EXACT_UPLIFT = 0.2;      // Growth_ExactMatchUpliftFactor
+const GROWTH_BUDGET_UPLIFT = 0.3;     // Growth_BudgetUpliftFactor
+const GROWTH_HAIRCUT = 0.7;           // Growth_ConfidenceHaircut
+
+function runGrowthOpportunity(findings: Finding[]): number {
+  const impactOf = (idPrefix: string) => findings.find(f => f.id === idPrefix)?.impact ?? 0;
+  const expansionSales = impactOf("st-summary-exactexpansion");
+  const underfundedSales = impactOf("st-summary-underfunded");
+  const neverAddedSales = impactOf("st-summary-neveradded");
+  const compA = expansionSales * GROWTH_EXACT_UPLIFT * GROWTH_HAIRCUT;
+  const compB = underfundedSales * GROWTH_BUDGET_UPLIFT * GROWTH_HAIRCUT;
+  const compC = neverAddedSales * GROWTH_EXACT_UPLIFT * GROWTH_HAIRCUT;
+  return compA + compB + compC;
+}
+
+// ── Recommendation (mod_Recommendation) ──
+// Ranks every non-scoringExempt finding by severity tier first, dollar impact (capped at
+// 999,999) as tiebreaker only — severity always dominates.
+function getTopActions(findings: Finding[], howMany = 5): Finding[] {
+  const sevTier: Record<Finding["severity"], number> = { critical: 4, high: 3, medium: 2, low: 1 };
+  const eligible = findings.filter(f => !f.scoringExempt);
+  return [...eligible]
+    .sort((a, b) => {
+      const ra = sevTier[a.severity] * 1000000 + Math.min(a.impact, 999999);
+      const rb = sevTier[b.severity] * 1000000 + Math.min(b.impact, 999999);
+      return rb - ra;
+    })
+    .slice(0, howMany);
 }
 
 // ── Main Engine Entry Point ──
@@ -746,37 +1085,40 @@ export function runAuditEngine(data: RawData): AuditResult {
     reportingDays: 30,
   };
 
-  // ── Run all audit modules ──
+  // ── Run all audit modules (RunFullAudit order) ──
   const asinCohorts    = runAsinAudit(sales, traffic);
   const kwFindings     = runKeywordAudit(campaign);
+  const stFindings     = runSearchTermAudit(searchTerm, campaign);
   const campFindings   = runCampaignAudit(campaign);
-  const stFindings     = runSearchTermAudit(searchTerm);
   const asinFindings   = runAsinOpportunities(asinCohorts);
 
-  const allFindings = [...kwFindings, ...campFindings, ...stFindings, ...asinFindings];
+  const allFindings = [...kwFindings, ...stFindings, ...campFindings, ...asinFindings];
 
-  // ── Score ──
-  const { score, spendEfficiency, structureQuality } = calculateScore(allFindings, summary);
-  const scoreLabel =
-    score >= 80 ? "Healthy" :
-    score >= 65 ? "Needs Attention" :
-    score >= 50 ? "At Risk" : "Critical";
+  // ── Score (mod_Scoring) — ctrGap defaults to 0 until a Benchmark file is supported ──
+  const scoring = runScoring(campaign, searchTerm, 0);
+  const score = scoring.healthScore;
+  const scoreLabel = scoring.riskLevel;
 
-  const totalWaste = allFindings
-    .filter(f => f.category === "waste")
-    .reduce((s, f) => s + f.impact, 0);
+  // ── Growth Opportunity (mod_GrowthOpportunity) ──
+  const growthOpportunity = runGrowthOpportunity(allFindings);
 
-  const totalOpportunity = allFindings
-    .filter(f => f.category === "opportunity")
-    .reduce((s, f) => s + f.impact * 4, 0);
+  // ── Recommendation (mod_Recommendation) — only non-itemized findings are ranked ──
+  const topActions = getTopActions(allFindings, 5);
+
+  // "Wasted Spend" is the exact VBA GetEstimatedWastedSpend figure (zero-return waste only —
+  // does not include overspend-relative-to-target impacts). Top waste/opportunity lists use
+  // only non-scoringExempt findings so itemized child rows don't double-count against their
+  // own summary roll-up.
+  const totalWaste = scoring.wastedSpend;
+  const totalOpportunity = growthOpportunity;
 
   const topWaste = [...allFindings]
-    .filter(f => f.category === "waste")
+    .filter(f => f.category === "waste" && !f.scoringExempt)
     .sort((a, b) => b.impact - a.impact)
     .slice(0, 5);
 
   const topOpportunities = [...allFindings]
-    .filter(f => f.category === "opportunity")
+    .filter(f => f.category === "opportunity" && !f.scoringExempt)
     .sort((a, b) => b.impact - a.impact)
     .slice(0, 5);
 
@@ -907,11 +1249,14 @@ export function runAuditEngine(data: RawData): AuditResult {
   return {
     score,
     scoreLabel,
-    spendEfficiency,
-    structureQuality,
+    keywordScore: scoring.keywordScore,
+    searchTermScore: scoring.searchTermScore,
+    budgetScore: scoring.budgetScore,
+    growthOpportunity,
+    topActions,
     totalWaste,
     totalOpportunity,
-    criticalCount: allFindings.filter(f => f.severity === "critical").length,
+    criticalCount: allFindings.filter(f => f.severity === "critical" && !f.scoringExempt).length,
     findings: allFindings,
     asinCohorts,
     topWaste,
