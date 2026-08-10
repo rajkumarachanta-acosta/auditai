@@ -1,0 +1,50 @@
+{
+  "week": "2026-W33",
+  "generatedAt": "2026-08-10T15:52:49.207Z",
+  "newLeads": 3,
+  "tierA": 2,
+  "tierB": 1,
+  "tierC": 0,
+  "amazonFocused": 2,
+  "amazonAndWalmart": 1,
+  "newCompanies": 3,
+  "previouslyContacted": 0,
+  "topFive": [
+    {
+      "company": "Growve",
+      "score": 90,
+      "person": "Audrey McCarty",
+      "title": "EVP, Marketplace Operations",
+      "whyNow": "Growve is actively backfilling Amazon PPC capacity while running one of the largest multi-brand Amazon storefronts in health/wellness — a natural moment to show automation that reduces reliance on headcount scaling 1:1 with SKU count.",
+      "observedSignal": "17+ owned brands across nutrition, supplements, personal care, pet wellness — ~2,000 products",
+      "likelyPain": "Hypothesis: managing PPC bidding, keyword hygiene, and reporting consistently across 17+ brands and ~2,000 SKUs may be creating a workload bottleneck — reflected in the active Amazon PPC hiring. Not confirmed with campaign-level data.",
+      "recommendedAngle": "Show how AI-driven bid/keyword optimization keeps PPC consistent across 17+ brands without headcount scaling linearly with SKU count.",
+      "emailDraftReady": true,
+      "linkedinDraftReady": true
+    },
+    {
+      "company": "Newell Brands",
+      "score": 90,
+      "person": "Tambi Younes",
+      "title": "VP, eCommerce",
+      "whyNow": "Newell has five-plus retail-media roles open at once right now, including a dedicated billing-reconciliation specialist — a concrete signal that retail-media operations are scaling faster than the team supporting them.",
+      "observedSignal": "14 major brands (Rubbermaid, Sharpie, Graco, Coleman, Yankee Candle, Paper Mate, FoodSaver, Dymo, EXPO, Elmer's, Oster, NUK, Spontex, Campingaz) across writing instruments, baby gear, food storage, home fragrance, small appliances, outdoor, drinkware, commercial cleaning",
+      "likelyPain": "Hypothesis: simultaneous open reqs across Amazon account management, media strategy, and retail-media billing suggest campaign execution and cross-agency reporting reconciliation may be stretching the existing team. Not confirmed with internal headcount or spend data.",
+      "recommendedAngle": "Focus on how automated retail-media reporting/reconciliation could cut the manual work behind the new billing-specialist hire.",
+      "emailDraftReady": true,
+      "linkedinDraftReady": true
+    },
+    {
+      "company": "Garan, Incorporated",
+      "score": 75,
+      "person": "Kristen Campolattaro",
+      "title": "Chief Marketing Officer, Children's Apparel",
+      "whyNow": "Garan is standing up its first-ever in-house retail media function across Amazon and Walmart.com — the gap between today's (likely manual/agency-run) operations and that new hire landing is exactly the window to show what automation covers.",
+      "observedSignal": "Garanimals + 365 kids sub-line distributed across Walmart.com, Amazon, and select brick-and-mortar (Fred Meyer, Kroger, Burlington) — Berkshire Hathaway subsidiary since 2002",
+      "likelyPain": "Hypothesis: with no in-house retail media function until this hire lands, Amazon/Walmart campaign management may today be handled manually or via an external agency, creating reporting and hand-off overhead. Not confirmed — no visibility into Garan's current operating model.",
+      "recommendedAngle": "Offer to show what an AI-run campaign audit looks like on Garanimals' current Amazon/Walmart campaigns while the in-house function is still being built out.",
+      "emailDraftReady": false,
+      "linkedinDraftReady": false
+    }
+  ]
+}
