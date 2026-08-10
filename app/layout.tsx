@@ -1,10 +1,9 @@
 import type { Metadata } from "next";
-import { brand } from "@/lib/brand";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: brand.appName,
-  description: brand.appTagline,
+  title: "Acosta Retail Media Toolkit",
+  description: "Bulk Campaign Generator, Campaign Audit Engine and Keyword Harvesting in one workspace.",
 };
 
 export default function RootLayout({
