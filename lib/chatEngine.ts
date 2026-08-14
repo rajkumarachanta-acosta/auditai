@@ -26,7 +26,7 @@ function fmtN(n: number): string   { return n.toLocaleString(); }
 // As new data sources are added (inventory, SB/SD, DSP, BSR, etc.) add them here.
 export function buildLLMContext(audit: AuditResult, question: string): string {
   const {
-    summary, score, scoreLabel, spendEfficiency, structureQuality,
+    summary, score, scoreLabel, keywordScore, searchTermScore, budgetScore,
     totalWaste, totalOpportunity, findings, asinCohorts,
     topWaste, topOpportunities, campaignTable, asinTable,
     hasCampaignData, hasSalesData, periodLabel,
@@ -35,7 +35,7 @@ export function buildLLMContext(audit: AuditResult, question: string): string {
   // ── Account-level KPIs ──
   const kpis = [
     `Health Score: ${score}/100 (${scoreLabel})`,
-    `Spend Efficiency: ${spendEfficiency}/70 | Structure Quality: ${structureQuality}/30`,
+    `Keyword Audit: ${keywordScore}/100 | Search Term Audit: ${searchTermScore}/100 | Budget Audit: ${budgetScore}/100`,
     `Period: ${periodLabel} (~${summary.reportingDays} days)`,
     `Total Ad Spend: ${fmt$(summary.totalSpend)} | Ad Sales: ${fmt$(summary.totalSales)}`,
     `ACOS: ${fmtPct(summary.avgAcos)} | CVR: ${fmtPct(summary.avgCvr)} | CTR: ${fmtPct(summary.avgCtr)}`,
@@ -167,7 +167,7 @@ Answer now. Be specific, use exact numbers and names from the data above. If the
 export function buildLocalResponse(audit: AuditResult, _intentParam: string, question: string): string {
   const q = question.toLowerCase();
   const {
-    summary, score, scoreLabel, spendEfficiency, structureQuality,
+    summary, score, scoreLabel, keywordScore, searchTermScore, budgetScore,
     totalWaste, totalOpportunity, findings, asinCohorts,
     topWaste, topOpportunities, campaignTable, asinTable,
   } = audit;
@@ -307,8 +307,9 @@ ${rows.length > limit ? `<div style="font-size:11px;color:#57606a;margin-top:4px
     const gain     = Math.min(27, findings.filter(f=>f.severity==="critical").length*5 + findings.filter(f=>f.severity==="high").length*2);
     return `Health score <strong>${score}/100 — ${scoreLabel}</strong>
       <div class="chip-row">
-        <div class="chip-stat ${spendEfficiency<50?"red":"yellow"}"><span>${spendEfficiency}</span>Spend /70</div>
-        <div class="chip-stat ${structureQuality<20?"red":"yellow"}"><span>${structureQuality}</span>Structure /30</div>
+        <div class="chip-stat ${keywordScore<70?"red":"yellow"}"><span>${keywordScore}</span>Keyword</div>
+        <div class="chip-stat ${searchTermScore<70?"red":"yellow"}"><span>${searchTermScore}</span>Search Term</div>
+        <div class="chip-stat ${budgetScore<70?"red":"yellow"}"><span>${budgetScore}</span>Budget</div>
         <div class="chip-stat red"><span>${findings.filter(f=>f.severity==="critical").length}</span>Critical</div>
       </div>
       ${lines}<br><strong>Fix critical issues → estimated: ${Math.min(100,score+gain)}/100</strong>`;

@@ -47,7 +47,7 @@ export async function generatePptx(audit: AuditResult, brandName = "Your Account
   pptx.author = "AuditAI";
   pptx.title = `${brandName} — Campaign Audit Report`;
 
-  const { summary, score, scoreLabel, spendEfficiency, structureQuality, totalWaste: totalWeeklyWaste, totalOpportunity: totalMonthlyOpportunity, findings, topWaste, topOpportunities, asinCohorts } = audit;
+  const { summary, score, scoreLabel, keywordScore, searchTermScore, budgetScore, totalWaste: totalWeeklyWaste, totalOpportunity: totalMonthlyOpportunity, findings, topWaste, topOpportunities, asinCohorts } = audit;
 
   // ── SLIDE 1: Title ──
   const s1 = pptx.addSlide();
@@ -101,11 +101,12 @@ export async function generatePptx(audit: AuditResult, brandName = "Your Account
   addHeader(s3, "Account Scorecard", "Health score breakdown by category");
 
   const scoreItems = [
-    { label: "Spend Efficiency", score: spendEfficiency, max: 70, desc: "Waste ratio, ACOS performance, zero-return campaigns" },
-    { label: "Structure Quality", score: structureQuality, max: 30, desc: "Negative keywords, campaign structure, concentration risk" },
+    { label: "Keyword Audit (40% weight)", score: keywordScore, max: 100, desc: "High-spend/zero-sales, high ACOS, low CTR, low conversion" },
+    { label: "Search Term Audit (30% weight)", score: searchTermScore, max: 100, desc: "Wasted spend, underfunded converters, coverage gaps" },
+    { label: "Budget Audit (30% weight)", score: budgetScore, max: 100, desc: "Overspending, wasted spend, spend concentration risk" },
   ];
   scoreItems.forEach((item, i) => {
-    const y = 1.4 + i * 2.0;
+    const y = 1.4 + i * 1.5;
     s3.addText(item.label, { x: 0.4, y, w: 4, h: 0.4, fontSize: 14, bold: true, color: DARK, fontFace: "Segoe UI" });
     s3.addText(item.desc, { x: 0.4, y: y + 0.4, w: 6, h: 0.3, fontSize: 10, color: MUTED, fontFace: "Segoe UI" });
     const barW = 8.0;
@@ -116,7 +117,7 @@ export async function generatePptx(audit: AuditResult, brandName = "Your Account
   });
 
   s3.addText(`Overall Health Score: ${score}/100 — ${scoreLabel}`, {
-    x: 0.4, y: 5.8, w: 9.2, h: 0.5, fontSize: 16, bold: true, color: scoreColor(score), align: "center", fontFace: "Segoe UI",
+    x: 0.4, y: 6.3, w: 9.2, h: 0.5, fontSize: 16, bold: true, color: scoreColor(score), align: "center", fontFace: "Segoe UI",
   });
   addFooter(s3, 3);
 
