@@ -6,6 +6,32 @@ topic/angle and a different structural hook than any of them.
 
 ---
 
+## 2026-08-16 — Topic: Keyword bloat dilutes budget (structure quality myth-bust)
+
+**Angle tag:** `keyword-bloat`, `structure-quality`, `myth-bust`
+
+**Hook:** "More keywords does not mean more sales. On most accounts I audit, it means the opposite."
+
+**Post:**
+
+More keywords does not mean more sales. On most accounts I audit, it means the opposite.
+
+I pulled the numbers across dozens of Amazon ad audits this year. The pattern is remarkably consistent: accounts running 300+ active keywords per campaign convert worse, not better, than accounts running 30.
+
+Here's the myth: more keywords = more coverage = more sales. Here's the mechanic actually happening: Amazon's algorithm splits impression share across every active keyword in a campaign. Add keyword #301 and you're not adding incremental reach — you're diluting the budget and signal that keywords #1 through #50 were using to actually convert.
+
+The accounts with 30 tight keywords aren't missing traffic. They're winning the auction more often on the terms that matter, because the campaign isn't fighting itself for the same budget pool.
+
+The fix isn't "add more." It's "prune to what's proven, then expand deliberately, one high-conviction term at a time — and watch what happens to the keywords you already had."
+
+If your agency's monthly report celebrates "keywords added" as a metric of progress, ask instead: what's our conversion rate per active keyword, and is it going up or down as that number grows?
+
+More isn't coverage. More is often just noise competing with your own budget.
+
+#AmazonAdvertising #PPC #Ecommerce #DTC #FounderLed
+
+---
+
 ## 2026-08-09 — Topic: ASIN portfolio triage as capital allocation (not ad optimization)
 
 **Angle tag:** `asin-portfolio`, `capital-allocation`, `framework`
