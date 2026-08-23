@@ -6,6 +6,28 @@ topic/angle and a different structural hook than any of them.
 
 ---
 
+## 2026-08-23 — Topic: Brand-term conquesting / competitor defense (P&L leak)
+
+**Angle tag:** `brand-defense`, `competitor-conquesting`, `direct-challenge`
+
+**Hook:** "A competitor is bidding on your own brand name right now. Most founders don't know until they check."
+
+**Post:**
+
+A competitor is bidding on your own brand name right now. Most founders don't know until they check.
+
+Brand-term conquesting is one of the cheapest, most effective plays in Amazon advertising — which is exactly why competitors run it against you. Someone searches your brand name, already convinced, ready to buy — and a rival's ad sits above your own listing, at a fraction of what it costs them to acquire that same customer cold.
+
+I've seen accounts lose double-digit percentages of branded search traffic to a single competitor's Sponsored Brands campaign, for months, before anyone noticed. It doesn't show up as "ad waste" — it shows up as unexplained softness in a category that should be your strongest.
+
+Defending it isn't complicated. It's a Sponsored Brands or Sponsored Products campaign on your own exact brand terms, bid high enough to hold the top slot, funded from a separate line item than your acquisition budget — because defense and growth are different jobs and shouldn't compete for the same dollars.
+
+One five-minute check this week: search your own brand name on Amazon, logged out, on mobile. If anything but your own listing shows up first, you're already paying a tax on your own equity — you just haven't seen the invoice.
+
+#AmazonAdvertising #BrandDefense #Ecommerce #DTC #FounderLed
+
+---
+
 ## 2026-08-16 — Topic: Keyword bloat dilutes budget (structure quality myth-bust)
 
 **Angle tag:** `keyword-bloat`, `structure-quality`, `myth-bust`
