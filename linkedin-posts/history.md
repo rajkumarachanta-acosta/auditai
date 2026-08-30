@@ -6,6 +6,30 @@ topic/angle and a different structural hook than any of them.
 
 ---
 
+## 2026-08-30 — Topic: Agency fee incentive misalignment (% of spend contracts)
+
+**Angle tag:** `agency-incentives`, `fee-misalignment`, `math-breakdown`
+
+**Hook:** "Ask your agency how they get paid. The answer explains every recommendation they've ever made."
+
+**Post:**
+
+Ask your agency how they get paid. The answer explains every recommendation they've ever made.
+
+Most Amazon ad agencies charge a percentage of spend — typically 10-15%. Run the math on what that actually incentivizes.
+
+An agency managing $50K/month at 12% makes $6,000. Recommend a 20% budget increase to $60K, and their fee jumps to $7,200 — a 20% raise for them, with zero requirement that revenue, margin, or efficiency improved at all. The incentive isn't "grow your business." It's "grow your spend." Those overlap often enough that nobody questions it, but they are not the same thing.
+
+I've audited accounts where ACOS crept up every quarter for two years, and the agency's fee grew right alongside it. Nobody was doing anything wrong by their contract. The contract was just built to reward the wrong outcome.
+
+The fix isn't firing every percentage-of-spend agency — plenty do good work despite the incentive. It's asking one direct question at your next review: "What would you recommend if your fee were flat, not tied to spend?" If the answer changes, you've just found out how much of your budget growth was strategy versus incentive.
+
+Pay for outcomes you actually want, and don't be surprised when a percentage-of-spend contract keeps asking you for more spend.
+
+#AmazonAdvertising #AgencyRelationships #Ecommerce #DTC #FounderLed
+
+---
+
 ## 2026-08-23 — Topic: Brand-term conquesting / competitor defense (P&L leak)
 
 **Angle tag:** `brand-defense`, `competitor-conquesting`, `direct-challenge`
