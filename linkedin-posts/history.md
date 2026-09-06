@@ -6,6 +6,30 @@ topic/angle and a different structural hook than any of them.
 
 ---
 
+## 2026-09-06 — Topic: Paid/organic halo effect — attribution blind spot when cutting spend
+
+**Angle tag:** `halo-effect`, `attribution-blindspot`, `confession`
+
+**Hook:** "I once told a founder to cut a 'wasteful' campaign. It cost him more than the ad spend ever did."
+
+**Post:**
+
+I once told a founder to cut a "wasteful" campaign. It cost him more than the ad spend ever did.
+
+The keyword had spent $3,200 over 30 days with only $1,100 in attributed sales — 34% ACOS on paper, well above his 25% target. Standard advice: pause it, reallocate the budget. I gave that advice.
+
+Three weeks later, organic sales on that ASIN had dropped 22%. Nothing else changed — same listing, same price, same season. The only variable was that keyword going dark.
+
+What Amazon's attribution window doesn't capture: a keyword can drive a sale today that gets credited to it, and drive ten more searches next week that show up as "organic" because the customer came back through a different path. Cut the ad, and you don't just lose the attributed sales — you lose the demand it was quietly generating that never got counted as its own.
+
+ACOS measures what a keyword can prove. It says nothing about what it's actually doing underneath. Before you cut anything for looking inefficient, check organic rank and sales trend on that ASIN for 2-3 weeks after — retroactively, on something you already paused, if you have to.
+
+Some of your "waste" is doing more work than the report gives it credit for.
+
+#AmazonAdvertising #Attribution #Ecommerce #DTC #FounderLed
+
+---
+
 ## 2026-08-30 — Topic: Agency fee incentive misalignment (% of spend contracts)
 
 **Angle tag:** `agency-incentives`, `fee-misalignment`, `math-breakdown`
